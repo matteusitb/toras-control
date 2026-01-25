@@ -1,0 +1,7 @@
+node_modules/
+dist_setup/
+dist/
+out/
+database.sqlite
+.env
+*.log

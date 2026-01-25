@@ -5,3 +5,4 @@ out/
 database.sqlite
 .env
 *.log
+renderer.js

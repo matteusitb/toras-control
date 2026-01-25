@@ -63,13 +63,13 @@ try { db.exec("ALTER TABLE toras ADD COLUMN status TEXT DEFAULT 'pátio';"); } c
 try { db.exec("ALTER TABLE toras ADD COLUMN data_saida TEXT;"); } catch (e) { }
 
 // --- JANELA PRINCIPAL COM TRAVAS DE PRODUÇÃO ---
-const packageInfo = require('./package.json');const packageInfo = require('./package.json');
+const packageInfo = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
 function createWindow() {
     mainWindow = new BrowserWindow({
         width: 1280,
         height: 800,
         minWidth: 1050,
-        title: `${packageInfo.productName} - v${packageInfo.version}`,
+        title: `${packageInfo.productName || "Controle de Toras"} - v${packageInfo.version || "1.0.0"}`,
         show: false,
         webPreferences: {
             nodeIntegration: true,

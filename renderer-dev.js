@@ -950,62 +950,51 @@ async function processarBaixaEGerarPDF() {
 }
 
 // --- FUNÇÕES DO ESTOQUE GERAL ---
-let offsetEstoque = 0; // Controle de paginação
+let offsetEstoque = 0;
+let estaCarregando = false;
 
 async function carregarEstoque(resetarPaginacao = false) {
+    if (estaCarregando) return;
+
     const corpo = document.getElementById('lista-estoque-corpo');
     const btnMais = document.getElementById('btn-carregar-mais');
     if (!corpo) return;
 
     try {
-        // 1. Reset de Paginação (quando muda filtro ou abre a tela)
+        estaCarregando = true;
+
+        const status = document.getElementById('filtro-estoque-status').value;
+        const loteId = document.getElementById('filtro-estoque-lote').value;
+        const codigoInput = document.getElementById('filtro-estoque-codigo');
+        const codigo = codigoInput ? codigoInput.value.trim() : '';
+
         if (resetarPaginacao) {
             offsetEstoque = 0;
-            corpo.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px;"><div class="spinner"></div></td></tr>';
+            corpo.style.opacity = '0.5';
         }
 
-        // 2. Feedback visual no Botão
         if (btnMais) {
             btnMais.disabled = true;
-            btnMais.innerHTML = '<i data-lucide="loader-2" class="animate-spin"></i> Atualizando...';
+            btnMais.innerHTML = '<i data-lucide="loader-2" class="animate-spin"></i> Processando...';
             if (window.lucide) lucide.createIcons();
         }
 
-        // 3. Captura dos Filtros
-        const status = document.getElementById('filtro-estoque-status').value;
-        const loteId = document.getElementById('filtro-estoque-lote').value;
-        const codigo = document.getElementById('filtro-estoque-codigo').value.trim();
+        const [totais, toras] = await Promise.all([
+            window.api.invoke('get-totais-estoque', { status, codigo, loteId }),
+            window.api.invoke('get-estoque-detalhado', { status, codigo, loteId, limite: 50, pular: offsetEstoque })
+        ]);
 
-        // 4. BUSCA TOTAIS GERAIS (Independente da paginação)
-        // Isso garante que os indicadores mostrem o total real do pátio
-        const totais = await window.api.invoke('get-totais-estoque', { status, codigo, loteId });
-        
-        document.getElementById('indicador-qtd-patio').innerText = totais.total_qtd.toLocaleString('pt-BR');
-        document.getElementById('indicador-vol-patio').innerText = 
-            (totais.total_vol || 0).toFixed(3).replace('.', ',');
+        const elQtd = document.getElementById('indicador-qtd-patio');
+        const elVol = document.getElementById('indicador-vol-patio');
+        if (elQtd) elQtd.innerText = (totais.total_qtd || 0).toLocaleString('pt-BR');
+        if (elVol) elVol.innerText = (totais.total_vol || 0).toFixed(3).replace('.', ',');
 
-        // 5. BUSCA LINHAS DA TABELA (Paginado)
-        const toras = await window.api.invoke('get-estoque-detalhado', { 
-            status, 
-            codigo, 
-            loteId, 
-            limite: 50, 
-            pular: offsetEstoque 
-        });
-
-        // 6. Limpeza se for primeira página
-        if (offsetEstoque === 0) {
-            corpo.innerHTML = '';
-        }
-
-        // 7. Verificação de lista vazia
         if (toras.length === 0 && offsetEstoque === 0) {
-            corpo.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 20px;">Nenhuma tora encontrada.</td></tr>';
+            corpo.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 20px;">Nenhuma tora encontrada.</td></tr>';
             if (btnMais) btnMais.style.display = 'none';
             return;
         }
 
-        // 8. Renderização das Linhas
         const htmlLinhas = toras.map(t => {
             let medidasDisplay = `R: ${t.rodo} | C: ${t.comprimento.toFixed(2)}`;
             if (t.desconto_1 > 0 || t.desconto_2 > 0) {
@@ -1015,35 +1004,41 @@ async function carregarEstoque(resetarPaginacao = false) {
             const statusClass = t.status === 'pátio' ? 'status-patio' : 'status-serrada';
             const statusTexto = t.status === 'pátio' ? 'NO PÁTIO' : 'SERRADA';
 
+            // Recuperando seus botões e ícones originais [cite: 2026-01-16]
             return `
                 <tr>
                     <td><span class="badge-numero">${t.codigo}</span></td>
                     <td>${t.especie_nome || '---'}</td>
                     <td><span class="badge-lote-">${t.lote_numero || '---'}</span></td>
                     <td>${medidasDisplay}</td>
-                    <td style="font-weight: bold;">${t.volume.toFixed(3).replace('.', ',')}</td>
+                    <td style="font-weight: bold;">${(t.volume || 0).toFixed(3).replace('.', ',')}</td>
                     <td><span class="status-tag ${statusClass}">${statusTexto}</span></td>
                     <td>${new Date(t.data_entrada).toLocaleDateString('pt-BR')}</td>
                     <td style="text-align: right;">
-                        <button class="btn-icon-edit" onclick="prepararEdicaoTora('${encodeURIComponent(JSON.stringify(t))}')">
+                        <button class="btn-icon-edit" title="Editar" 
+                                onclick="prepararEdicaoTora('${encodeURIComponent(JSON.stringify(t))}')">
                             <i data-lucide="pencil"></i>
                         </button>
-                        <button class="btn-icon-delete" onclick="confirmarExclusaoTora(${t.id}, '${t.codigo}', '${t.status}')">
+                        <button class="btn-icon-delete" title="Excluir" 
+                                onclick="confirmarExclusaoTora(${t.id}, '${t.codigo}', '${t.status}')">
                             <i data-lucide="trash-2"></i>
                         </button>
                     </td>
                 </tr>`;
         }).join('');
 
-        // 9. Inserção no DOM e Atualização do Controle
-        corpo.insertAdjacentHTML('beforeend', htmlLinhas);
+        if (offsetEstoque === 0) {
+            corpo.innerHTML = htmlLinhas;
+            corpo.style.opacity = '1'; // Volta ao normal
+        } else {
+            corpo.insertAdjacentHTML('beforeend', htmlLinhas);
+        }
+
         offsetEstoque += toras.length;
 
-        // 10. Finalização do Botão Carregar Mais
         if (btnMais) {
             btnMais.disabled = false;
             btnMais.innerHTML = '<i data-lucide="refresh-cw"></i> Carregar mais toras...';
-            // Esconde se a busca for por Número [cite: 2026-01-17] ou se acabarem os registros
             btnMais.style.display = (toras.length < 50 || codigo !== '') ? 'none' : 'block';
         }
 
@@ -1051,7 +1046,9 @@ async function carregarEstoque(resetarPaginacao = false) {
 
     } catch (err) {
         console.error("Erro ao carregar estoque:", err);
-        corpo.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #e11d48;">Erro ao processar dados.</td></tr>';
+        if (corpo) corpo.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #e11d48;">Erro ao processar dados.</td></tr>';
+    } finally {
+        estaCarregando = false;
     }
 }
 
@@ -1095,7 +1092,9 @@ async function confirmarExclusaoTora(id, codigo) {
                 Swal.fire('Não permitido', resultado.error, 'error');
             } else {
                 avisar('success', 'Tora removida do sistema.');
-                if (document.getElementById('v-estoque').classList.contains('active')) carregarEstoque();
+                if (document.getElementById('v-estoque').classList.contains('active')) {
+                    carregarEstoque(true);
+                }
                 listarTorasRecentes();
             }
         }
@@ -1197,20 +1196,30 @@ document.getElementById('rel-tipo').addEventListener('change', function () {
     }
 });
 
-async function gerarPreviaRelatorio() {
-    // 1. Captura os valores dos campos
-    const tipoRel = document.getElementById('rel-tipo').value;
+let offsetRelatorio = 0;
+let carregandoRelatorio = false;
 
+async function gerarPreviaRelatorio(resetarPaginacao = true) {
+    if (carregandoRelatorio) return;
+
+    const tipoRel = document.getElementById('rel-tipo').value;
+    const tbody = document.getElementById('rel-tabela-corpo');
+    const btnMais = document.getElementById('btn-rel-carregar-mais');
+    const containerResumos = document.getElementById('container-resumos');
+
+    // 1. Captura os filtros
     const filtros = {
-        tipo: tipoRel, // 'estoque_atual', 'baixas' ou 'geral'
+        tipo: tipoRel,
         dataInicio: document.getElementById('rel-data-inicio').value,
         dataFim: document.getElementById('rel-data-fim').value,
         especieId: document.getElementById('rel-especie').value,
-        loteId: document.getElementById('rel-lote').value
+        loteId: document.getElementById('rel-lote').value,
+        limite: 50,
+        pular: resetarPaginacao ? 0 : offsetRelatorio
     };
 
-    // 2. Validação: Para histórico ou baixas, as datas costumam ser importantes
-    if (tipoRel !== 'estoque_atual') {
+    // 2. Validação de Datas para relatórios que não são Inventário Total
+    if (tipoRel !== 'estoque') {
         if ((filtros.dataInicio && !filtros.dataFim) || (!filtros.dataInicio && filtros.dataFim)) {
             Swal.fire('Atenção', 'Para relatórios históricos, preencha ambas as datas.', 'warning');
             return;
@@ -1218,137 +1227,164 @@ async function gerarPreviaRelatorio() {
     }
 
     try {
-        // 3. Chama o Main.js passando os filtros
-        const dados = await window.api.invoke('buscar-dados-relatorio', filtros);
+        carregandoRelatorio = true;
 
-        // 4. Renderiza os resultados na tabela e nos indicadores
-        // Estas funções devem estar preparadas para as 11 colunas se necessário
-        renderizarTabelaRelatorio(dados);
-        atualizarIndicadoresRelatorio(dados);
+        // Feedback visual no botão (Padrão Estoque Geral)
+        if (btnMais) {
+            btnMais.disabled = true;
+            btnMais.innerHTML = '<i data-lucide="loader-2" class="animate-spin"></i> Processando...';
+            if (window.lucide) lucide.createIcons();
+        }
+
+        if (resetarPaginacao) {
+            offsetRelatorio = 0;
+            tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 40px;">Buscando dados...</td></tr>';
+            if (containerResumos) containerResumos.innerHTML = '';
+            
+            // BUSCA RESUMOS (Calcula totais de todas as toras para os cards de espécie/lote)
+            const resumoGeral = await window.api.invoke('get-resumo-gerencial', filtros);
+            renderizarResumosDescritivos(resumoGeral);
+            
+            tbody.innerHTML = ''; // Limpa para carregar a tabela
+        }
+
+        // BUSCA TORAS PAGINADAS (Apenas 50 por vez)
+        const toras = await window.api.invoke('buscar-dados-relatorio-paginado', filtros);
+
+        if (toras.length === 0 && offsetRelatorio === 0) {
+            tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; padding: 40px; color: #94a3b8;">Nenhum registro encontrado para este filtro.</td></tr>`;
+            if (btnMais) btnMais.style.display = 'none';
+            return;
+        }
+
+        // 3. Renderiza as linhas na tabela (usando append para "Carregar mais")
+        renderizarLinhasTabelaRelatorio(toras, !resetarPaginacao);
+
+        // 4. Atualiza o offset e o estado do botão
+        offsetRelatorio += toras.length;
+        
+        if (btnMais) {
+            btnMais.disabled = false;
+            // Se vieram menos que 50, significa que acabou o banco
+            btnMais.style.display = toras.length < 50 ? 'none' : 'block';
+            btnMais.innerHTML = '<i data-lucide="refresh-cw"></i> Carregar mais registros...';
+            if (window.lucide) lucide.createIcons();
+        }
 
     } catch (err) {
         console.error("Erro ao gerar relatório:", err);
-        Swal.fire('Erro', 'Não foi possível buscar os dados do relatório.', 'error');
+        Swal.fire('Erro', 'Ocorreu um problema ao processar o relatório.', 'error');
+    } finally {
+        carregandoRelatorio = false;
     }
 }
-function renderizarTabelaRelatorio(dados) {
+
+// Função auxiliar para montar o HTML das linhas
+function renderizarLinhasTabelaRelatorio(dados, append = false) {
     const tbody = document.getElementById('rel-tabela-corpo');
-    const containerResumos = document.getElementById('container-resumos');
-
-    // Limpeza obrigatória para não acumular resumos de buscas anteriores
-    if (containerResumos) containerResumos.innerHTML = '';
-
-    if (!dados || dados.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 40px; color: #94a3b8;">Nenhum registro encontrado.</td></tr>`;
-        document.getElementById('rel-total-vol').innerText = '0,000 m³';
-        document.getElementById('rel-total-qtd').innerText = '0';
-        return;
-    }
-
-    let volTotalGeral = 0;
-    const resumoEspecies = {};
-    const resumoLotes = {};
-
-    // --- PROCESSAMENTO DOS DADOS ---
-    let htmlLinhas = "";
-    dados.forEach(t => {
+    
+    const html = dados.map(t => {
         const vol = Number(t.volume);
-        volTotalGeral += vol;
-
-        // Inicialização dos objetos de resumo
-        if (!resumoEspecies[t.especie_nome]) resumoEspecies[t.especie_nome] = { pQtd: 0, pVol: 0, sQtd: 0, sVol: 0 };
-        if (!resumoLotes[t.lote_numero]) resumoLotes[t.lote_numero] = { pQtd: 0, pVol: 0, sQtd: 0, sVol: 0 };
-
-        if (t.status === 'serrada') {
-            resumoEspecies[t.especie_nome].sQtd++;
-            resumoEspecies[t.especie_nome].sVol += vol;
-            resumoLotes[t.lote_numero].sQtd++;
-            resumoLotes[t.lote_numero].sVol += vol;
-        } else {
-            resumoEspecies[t.especie_nome].pQtd++;
-            resumoEspecies[t.especie_nome].pVol += vol;
-            resumoLotes[t.lote_numero].pQtd++;
-            resumoLotes[t.lote_numero].pVol += vol;
-        }
-
-        const compFormatado = Number(t.comprimento).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        const volFormatado = vol.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
-
-        // Tags e Datas
         const statusTag = t.status === 'serrada' ? '<b style="color:#ef4444">[S]</b>' : '<b style="color:#22c55e">[P]</b>';
         const dataEntrada = new Date(t.data_entrada).toLocaleDateString('pt-BR');
         const dataSaida = t.data_saida ? new Date(t.data_saida).toLocaleDateString('pt-BR') : '---';
-
-        htmlLinhas += `
+        
+        return `
             <tr>
-                <td><span class="badge-numero">${t.codigo}</span></td> <td>${t.especie_nome}</td>
+                <td><span class="badge-numero">${t.codigo}</span></td> 
+                <td>${t.especie_nome}</td>
                 <td><span class="badge-lote">${t.lote_numero || '---'}</span></td>
-                <td style="text-align: center;">
-                    R: ${t.rodo} | C: ${compFormatado}
-                    ${(t.desconto_1 > 0 || t.desconto_2 > 0) ? `<br><small style="color:#ef4444">Oco: ${t.desconto_1}x${t.desconto_2}</small>` : ''}
-                </td>
-                <td style="text-align: center;"><b>${volFormatado}</b></td>
+                <td style="text-align: center;">R: ${t.rodo} | C: ${Number(t.comprimento).toFixed(2)}</td>
+                <td style="text-align: center;"><b>${vol.toLocaleString('pt-BR', { minimumFractionDigits: 3 })}</b></td>
                 <td style="text-align: center;">${dataEntrada}</td>
-                <td style="text-align: center; color: #ef4444;">
-                    ${t.status === 'serrada' ? `<b>${dataSaida}</b>` : '<span style="color: #cbd5e1">---</span>'}
-                </td>
-                <td style="text-align: right; padding-right: 10px;">
-                    <small>${statusTag}</small>
-                </td>
+                <td style="text-align: center; color: #ef4444;">${dataSaida}</td>
+                <td style="text-align: right;"><small>${statusTag}</small></td>
             </tr>`;
-    });
+    }).join('');
 
-    // Injeta as linhas na tabela
-    tbody.innerHTML = htmlLinhas;
+    if (append) {
+        tbody.insertAdjacentHTML('beforeend', html);
+    } else {
+        tbody.innerHTML = html;
+    }
+}
+// Apenas para desenhar as linhas (tr)
+function renderizarLinhasTabelaRelatorio(dados, append = false) {
+    const tbody = document.getElementById('rel-tabela-corpo');
+    
+    const html = dados.map(t => {
+        const vol = Number(t.volume);
+        const statusTag = t.status === 'serrada' ? '<b style="color:#ef4444">[S]</b>' : '<b style="color:#22c55e">[P]</b>';
+        
+        return `
+            <tr>
+                <td><span class="badge-numero">${t.codigo}</span></td> 
+                <td>${t.especie_nome}</td>
+                <td><span class="badge-lote">${t.lote_numero || '---'}</span></td>
+                <td style="text-align: center;">R: ${t.rodo} | C: ${Number(t.comprimento).toFixed(2)}</td>
+                <td style="text-align: center;"><b>${vol.toLocaleString('pt-BR', { minimumFractionDigits: 3 })}</b></td>
+                <td style="text-align: center;">${new Date(t.data_entrada).toLocaleDateString('pt-BR')}</td>
+                <td style="text-align: center; color: #ef4444;">${t.data_saida ? new Date(t.data_saida).toLocaleDateString('pt-BR') : '---'}</td>
+                <td style="text-align: right;"><small>${statusTag}</small></td>
+            </tr>`;
+    }).join('');
 
-    // Atualiza indicadores de topo
-    document.getElementById('rel-total-vol').innerText = `${volTotalGeral.toLocaleString('pt-BR', { minimumFractionDigits: 3 })} m³`;
-    document.getElementById('rel-total-qtd').innerText = dados.length;
+    if (append) {
+        tbody.insertAdjacentHTML('beforeend', html);
+    } else {
+        tbody.innerHTML = html;
+    }
+}
 
-    // --- RENDERIZAÇÃO DOS RESUMOS DESCRITIVOS ---
-    if (containerResumos) {
-        const criarFraseHtml = (qtd, vol, tipo) => {
-            if (qtd === 0) return "";
-            const termoTora = qtd === 1 ? "tora" : "toras";
-            const termoAcao = tipo === 'patio' ? "no pátio" : "serrada";
-            const dotColor = tipo === 'patio' ? "#22c55e" : "#ef4444";
+// Para preencher os cards de resumo de todas as 1.400 toras
+function renderizarResumosDescritivos(resumo) {
+    const containerResumos = document.getElementById('container-resumos');
+    if (!containerResumos) return;
 
-            return `
+    // Atualiza os indicadores de topo (Volume e Quantidade Totais)
+    document.getElementById('rel-total-vol').innerText = `${resumo.volTotalGeral.toLocaleString('pt-BR', { minimumFractionDigits: 3 })} m³`;
+    document.getElementById('rel-total-qtd').innerText = resumo.qtdTotalGeral;
+
+    const criarFraseHtml = (qtd, vol, tipo) => {
+        if (qtd === 0) return "";
+        const termoTora = qtd === 1 ? "tora" : "toras";
+        const termoAcao = tipo === 'patio' ? "no pátio" : "serrada";
+        const dotColor = tipo === 'patio' ? "#22c55e" : "#ef4444";
+        return `
             <div class="resumo-frase" style="display: flex; align-items: center; gap: 8px; margin-top: 4px;">
                 <span style="height: 8px; width: 8px; background: ${dotColor}; border-radius: 50%; display: inline-block;"></span>
                 <span style="font-size: 0.9rem; color: #475569;">
                     ${qtd} ${termoTora} ${termoAcao} totalizando: <b>${vol.toLocaleString('pt-BR', { minimumFractionDigits: 3 })} m³</b>
                 </span>
             </div>`;
-        };
+    };
 
-        let htmlResumo = `
-        <div class="resumo-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 30px;">
-            <div class="resumo-card" style="background: white; border: 1px solid #e2e8f0; padding: 20px; border-radius: 12px; border-left: 6px solid #95afc0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
-                <h4 class="resumo-titulo" style="color: #95afc0; font-weight: bold; margin-bottom: 15px; border-bottom: 2px solid #f1f5f9; padding-bottom: 8px;">Totais por Espécie</h4>
-                ${Object.entries(resumoEspecies).map(([nome, d]) => `
-                    <div class="resumo-item" style="margin-bottom: 16px;">
-                        <strong style="color: #1e293b; display: block; margin-bottom: 4px;">${nome}</strong>
-                        ${criarFraseHtml(d.pQtd, d.pVol, 'patio')}
-                        ${criarFraseHtml(d.sQtd, d.sVol, 'serrada')}
-                    </div>
-                `).join('')}
-            </div>
+    let htmlResumo = `
+    <div class="resumo-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 30px;">
+        <div class="resumo-card" style="background: white; border: 1px solid #e2e8f0; padding: 20px; border-radius: 12px; border-left: 6px solid #95afc0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
+            <h4 class="resumo-titulo" style="color: #95afc0; font-weight: bold; margin-bottom: 15px; border-bottom: 2px solid #f1f5f9; padding-bottom: 8px;">Totais por Espécie</h4>
+            ${Object.entries(resumo.resumoEspecies).map(([nome, d]) => `
+                <div class="resumo-item" style="margin-bottom: 16px;">
+                    <strong style="color: #1e293b; display: block; margin-bottom: 4px;">${nome}</strong>
+                    ${criarFraseHtml(d.pQtd, d.pVol, 'patio')}
+                    ${criarFraseHtml(d.sQtd, d.sVol, 'serrada')}
+                </div>
+            `).join('')}
+        </div>
 
-            <div class="resumo-card" style="background: white; border: 1px solid #e2e8f0; padding: 20px; border-radius: 12px; border-left: 6px solid #95afc0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
-                <h4 class="resumo-titulo" style="color: #95afc0; font-weight: bold; margin-bottom: 15px; border-bottom: 2px solid #f1f5f9; padding-bottom: 8px;">Totais por Lote</h4>
-                ${Object.entries(resumoLotes).map(([lote, d]) => `
-                    <div class="resumo-item" style="margin-bottom: 16px;">
-                        <strong style="color: #1e293b; display: block; margin-bottom: 4px;">Lote ${lote}</strong>
-                        ${criarFraseHtml(d.pQtd, d.pVol, 'patio')}
-                        ${criarFraseHtml(d.sQtd, d.sVol, 'serrada')}
-                    </div>
-                `).join('')}
-            </div>
-        </div>`;
+        <div class="resumo-card" style="background: white; border: 1px solid #e2e8f0; padding: 20px; border-radius: 12px; border-left: 6px solid #95afc0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
+            <h4 class="resumo-titulo" style="color: #95afc0; font-weight: bold; margin-bottom: 15px; border-bottom: 2px solid #f1f5f9; padding-bottom: 8px;">Totais por Lote</h4>
+            ${Object.entries(resumo.resumoLotes).map(([lote, d]) => `
+                <div class="resumo-item" style="margin-bottom: 16px;">
+                    <strong style="color: #1e293b; display: block; margin-bottom: 4px;">Lote ${lote}</strong>
+                    ${criarFraseHtml(d.pQtd, d.pVol, 'patio')}
+                    ${criarFraseHtml(d.sQtd, d.sVol, 'serrada')}
+                </div>
+            `).join('')}
+        </div>
+    </div>`;
 
-        containerResumos.innerHTML = htmlResumo;
-    }
+    containerResumos.innerHTML = htmlResumo;
 }
 
 function atualizarIndicadoresRelatorio(dados) {
@@ -1375,6 +1411,8 @@ async function exportarRelatorioPDF() {
     };
 
     try {
+        Swal.fire({ title: 'Gerando PDF...', didOpen: () => { Swal.showLoading(); } });
+
         const dados = await window.api.invoke('buscar-dados-relatorio', filtros);
 
         if (!dados || dados.length === 0) {
@@ -1384,26 +1422,26 @@ async function exportarRelatorioPDF() {
 
         // --- CABEÇALHO ---
         doc.setFont("helvetica", "bold"); doc.setFontSize(16);
-        doc.text("ToraControl - Relatório Operacional Detalhado", 14, 15);
+        doc.text("ToraControl - Relatório Gerencial Detalhado", 14, 15);
         doc.setFontSize(9); doc.setFont("helvetica", "normal");
         doc.text(`Emissão: ${new Date().toLocaleString('pt-BR')}`, 14, 22);
 
-        // --- PREPARAÇÃO DOS DADOS E RESUMOS ---
-        const colunas = ["Número", "Espécie", "Lote", "Rodo", "Comp", "Desc1", "Desc2", "Tot.Desc", "Vol (m³)", "Entrada", "Saída"];
+        // --- CÁLCULO DOS RESUMOS (IGUAL AO QUE TEMOS NO RENDERER) ---
         const resumoEspecies = {};
         const resumoLotes = {};
+        let volTotalGeral = 0;
 
         const linhas = dados.map(t => {
             const vol = Number(t.volume);
+            volTotalGeral += vol;
             const esp = t.especie_nome;
             const lote = t.lote_numero || 'S/L';
-            const status = t.status;
 
-            // Acumuladores para o Resumo
+            // Agrupamento para o Resumo do PDF
             if (!resumoEspecies[esp]) resumoEspecies[esp] = { pQtd: 0, pVol: 0, sQtd: 0, sVol: 0 };
             if (!resumoLotes[lote]) resumoLotes[lote] = { pQtd: 0, pVol: 0, sQtd: 0, sVol: 0 };
 
-            if (status === 'serrada') {
+            if (t.status === 'serrada') {
                 resumoEspecies[esp].sQtd++; resumoEspecies[esp].sVol += vol;
                 resumoLotes[lote].sQtd++; resumoLotes[lote].sVol += vol;
             } else {
@@ -1413,59 +1451,80 @@ async function exportarRelatorioPDF() {
 
             return [
                 t.codigo, esp, lote, t.rodo, Number(t.comprimento).toFixed(2),
-                t.desconto_1 || 0, t.desconto_2 || 0, (t.total_desconto || 0).toFixed(3),
+                t.desconto_1 || 0, t.desconto_2 || 0,
                 vol.toFixed(3), new Date(t.data_entrada).toLocaleDateString('pt-BR'),
                 t.data_saida ? new Date(t.data_saida).toLocaleDateString('pt-BR') : '---'
             ];
         });
 
-        // Gerar Tabela
+        // --- TABELA PRINCIPAL ---
         doc.autoTable({
-            startY: 28, head: [colunas], body: linhas, theme: 'grid',
+            startY: 28,
+            head: [["Número", "Espécie", "Lote", "Rodo", "Comp", "D1", "D2", "Vol (m³)", "Entrada", "Saída"]],
+            body: linhas,
+            theme: 'grid',
             headStyles: { fillColor: [71, 85, 105], fontSize: 7, halign: 'center' },
             styles: { fontSize: 7, cellPadding: 1 },
-            columnStyles: { 0: { fontStyle: 'bold' }, 8: { fontStyle: 'bold' }, 10: { textColor: [220, 38, 38] } }
+            columnStyles: { 0: { fontStyle: 'bold' }, 7: { fontStyle: 'bold', halign: 'right' } }
         });
 
-        // --- SEÇÃO DE RESUMOS ---
+        // --- SEÇÃO DE RESUMOS NO FINAL ---
         let currentY = doc.lastAutoTable.finalY + 15;
+
+        // Função para evitar que o resumo saia da página
         const checkPage = (y) => { if (y > 185) { doc.addPage(); return 20; } return y; };
 
+        // 1. Resumo por Espécie
         doc.setFont("helvetica", "bold"); doc.setFontSize(11);
         doc.text("RESUMO POR ESPÉCIE", 14, currentY);
-        currentY += 7; doc.setFontSize(9); doc.setFont("helvetica", "normal");
+        currentY += 7;
+        doc.setFontSize(8); doc.setFont("helvetica", "normal");
 
         Object.entries(resumoEspecies).forEach(([nome, d]) => {
             currentY = checkPage(currentY);
             let txt = `${nome}: `;
             if (d.pQtd > 0) txt += `${d.pQtd} toras no pátio (${d.pVol.toFixed(3)} m³) | `;
             if (d.sQtd > 0) txt += `${d.sQtd} toras serradas (${d.sVol.toFixed(3)} m³)`;
-            doc.text(txt, 18, currentY); currentY += 5;
+            doc.text(txt, 18, currentY);
+            currentY += 5;
         });
 
-        currentY += 5; currentY = checkPage(currentY);
+        // 2. Resumo por Lote
+        currentY += 5;
+        currentY = checkPage(currentY);
         doc.setFont("helvetica", "bold"); doc.setFontSize(11);
         doc.text("RESUMO POR LOTE", 14, currentY);
-        currentY += 7; doc.setFontSize(9); doc.setFont("helvetica", "normal");
+        currentY += 7;
+        doc.setFontSize(8); doc.setFont("helvetica", "normal");
 
         Object.entries(resumoLotes).forEach(([lote, d]) => {
             currentY = checkPage(currentY);
             let txt = `Lote ${lote}: `;
             if (d.pQtd > 0) txt += `${d.pQtd} toras no pátio (${d.pVol.toFixed(3)} m³) | `;
             if (d.sQtd > 0) txt += `${d.sQtd} toras serradas (${d.sVol.toFixed(3)} m³)`;
-            doc.text(txt, 18, currentY); currentY += 5;
+            doc.text(txt, 18, currentY);
+            currentY += 5;
         });
 
+        // Total Geral em destaque
+        currentY += 5;
+        doc.setFont("helvetica", "bold"); doc.setFontSize(12);
+        doc.text(`VOLUME TOTAL GERAL: ${volTotalGeral.toFixed(3)} m³`, 14, currentY);
+
         doc.save(`Relatorio_Toras_${new Date().getTime()}.pdf`);
-        Swal.fire({ icon: 'success', title: 'PDF Gerado!', showConfirmButton: false, timer: 1500 });
-    } catch (err) { console.error(err); Swal.fire('Erro', 'Falha ao gerar PDF.', 'error'); }
+        Swal.close();
+
+    } catch (err) {
+        console.error(err);
+        Swal.fire('Erro', 'Falha ao gerar PDF.', 'error');
+    }
 }
 
 async function exportarRelatorioExcel() {
     const workbook = new ExcelJS.Workbook();
     const sheetDetalhes = workbook.addWorksheet('Listagem Detalhada');
 
-    // 1. Colunas da Planilha Principal
+    // 1. Configuração de Colunas da Planilha Principal
     sheetDetalhes.columns = [
         { header: 'Número', key: 'numero', width: 12 },
         { header: 'Espécie', key: 'especie', width: 25 },
@@ -1474,12 +1533,12 @@ async function exportarRelatorioExcel() {
         { header: 'Comp (m)', key: 'comp', width: 10 },
         { header: 'Desc 1', key: 'd1', width: 8 },
         { header: 'Desc 2', key: 'd2', width: 8 },
-        { header: 'Tot. Desc', key: 'tdesc', width: 10 },
         { header: 'Volume (m³)', key: 'vol', width: 15 },
         { header: 'Entrada', key: 'entrada', width: 15 },
         { header: 'Saída', key: 'saida', width: 15 }
     ];
 
+    // Estilização do Cabeçalho (Padrão Cinza Escuro)
     sheetDetalhes.getRow(1).eachCell(c => {
         c.font = { bold: true, color: { argb: 'FFFFFFFF' } };
         c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF475569' } };
@@ -1494,25 +1553,32 @@ async function exportarRelatorioExcel() {
     };
 
     try {
+        Swal.fire({ title: 'Gerando Excel...', didOpen: () => { Swal.showLoading(); } });
+
+        // Busca TODOS os dados (ignorando paginação da tela)
         const dados = await window.api.invoke('buscar-dados-relatorio', filtros);
-        const resumoEspecies = {}; const resumoLotes = {};
+        
+        const resumoEspecies = {}; 
+        const resumoLotes = {};
+        let volTotalGeral = 0;
 
         dados.forEach(t => {
             const vol = Number(t.volume);
+            volTotalGeral += vol;
             const esp = t.especie_nome;
             const lote = t.lote_numero || 'S/L';
 
-            // Popular Planilha Detalhada
+            // Adiciona Linha na Planilha Detalhada
             sheetDetalhes.addRow({
                 numero: t.codigo, especie: esp, lote: lote,
                 rodo: Number(t.rodo), comp: Number(t.comprimento),
                 d1: Number(t.desconto_1 || 0), d2: Number(t.desconto_2 || 0),
-                tdesc: Number(t.total_desconto || 0), vol: vol,
+                vol: vol,
                 entrada: new Date(t.data_entrada).toLocaleDateString('pt-BR'),
                 saida: t.data_saida ? new Date(t.data_saida).toLocaleDateString('pt-BR') : '---'
             });
 
-            // Lógica de Resumo
+            // Lógica de Acúmulo para o Resumo
             if (!resumoEspecies[esp]) resumoEspecies[esp] = { pQtd: 0, pVol: 0, sQtd: 0, sVol: 0 };
             if (!resumoLotes[lote]) resumoLotes[lote] = { pQtd: 0, pVol: 0, sQtd: 0, sVol: 0 };
 
@@ -1525,33 +1591,42 @@ async function exportarRelatorioExcel() {
             }
         });
 
-        // Criar Segunda Aba para Resumos
+        // --- ABA DE RESUMOS ---
         const sheetResumo = workbook.addWorksheet('Resumos Gerenciais');
         sheetResumo.getColumn(1).width = 80;
 
         const addSecao = (titulo, obj, labelPrefix = "") => {
-            sheetResumo.addRow([titulo]).font = { bold: true, size: 14 };
+            sheetResumo.addRow([titulo]).font = { bold: true, size: 14, color: { argb: 'FF1E293B' } };
             sheetResumo.addRow([]);
             Object.entries(obj).forEach(([key, d]) => {
                 sheetResumo.addRow([`${labelPrefix}${key}`]).font = { bold: true };
-                if (d.pQtd > 0) sheetResumo.addRow([`• ${d.pQtd} toras no pátio totalizando: ${d.pVol.toFixed(3).replace('.', ',')} m³`]);
-                if (d.sQtd > 0) sheetResumo.addRow([`• ${d.sQtd} toras serradas totalizando: ${d.sVol.toFixed(3).replace('.', ',')} m³`]);
+                if (d.pQtd > 0) sheetResumo.addRow([`  • ${d.pQtd} toras no pátio: ${d.pVol.toFixed(3).replace('.', ',')} m³`]);
+                if (d.sQtd > 0) sheetResumo.addRow([`  • ${d.sQtd} toras serradas: ${d.sVol.toFixed(3).replace('.', ',')} m³`]);
                 sheetResumo.addRow([]);
             });
         };
 
         addSecao("RESUMO POR ESPÉCIE", resumoEspecies);
         addSecao("RESUMO POR LOTE", resumoLotes, "Lote ");
+        
+        sheetResumo.addRow(["VOLUME TOTAL GERAL: " + volTotalGeral.toFixed(3).replace('.', ',') + " m³"]).font = { bold: true, size: 12 };
 
-        ['D', 'E', 'F', 'G', 'H', 'I'].forEach(c => sheetDetalhes.getColumn(c).numFmt = '#,##0.000');
+        // Formatação de Números na aba principal
+        sheetDetalhes.getColumn('H').numFmt = '#,##0.000';
 
         const buffer = await workbook.xlsx.writeBuffer();
         const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-        const a = document.createElement('a'); a.href = window.URL.createObjectURL(blob);
-        a.download = `Relatorio_Detalhado_${new Date().toISOString().split('T')[0]}.xlsx`; a.click();
+        const a = document.createElement('a');
+        a.href = window.URL.createObjectURL(blob);
+        a.download = `Relatorio_Geral_${new Date().toISOString().split('T')[0]}.xlsx`;
+        a.click();
 
         Swal.fire({ icon: 'success', title: 'Excel Gerado!', showConfirmButton: false, timer: 1500 });
-    } catch (err) { console.error(err); Swal.fire('Erro', 'Falha ao gerar Excel.', 'error'); }
+
+    } catch (err) {
+        console.error(err);
+        Swal.fire('Erro', 'Falha ao gerar planilha Excel.', 'error');
+    }
 }
 
 function limparFiltrosRelatorio() {
@@ -2205,6 +2280,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (err) {
         console.error("Erro ao carregar dados do dashboard:", err);
     }
+    atualizarFiltroLotes();
     atualizarDashboard();
     lucide.createIcons();
 });
@@ -2226,7 +2302,7 @@ function aplicarMascaraNumero(input) {
 
     // Converte para número para remover zeros à esquerda desnecessários antes de reformatar
     let numeroLimpo = parseInt(valor, 10);
-    
+
     if (isNaN(numeroLimpo)) {
         input.value = "";
         return;

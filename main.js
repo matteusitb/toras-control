@@ -3,6 +3,7 @@ const { machineIdSync } = require('node-machine-id');
 const fs = require('fs');
 const path = require('path');
 const Database = require('better-sqlite3');
+const { autoUpdater } = require("electron-updater");
 
 let mainWindow;
 
@@ -75,15 +76,50 @@ function createWindow() {
             devTools: !app.isPackaged // Bloqueia F12 em produção
         }
     });
-
+    mainWindow.once('ready-to-show', () => {
+        setupAutoUpdater(mainWindow);
+    });
     mainWindow.setMenu(null); // Layout limpo conforme solicitado [cite: 2026-01-16]
-     mainWindow.maximize();
+    mainWindow.maximize();
     mainWindow.loadFile('index.html');
     mainWindow.once('ready-to-show', () => mainWindow.show());
 
     if (app.isPackaged) {
         mainWindow.webContents.on('devtools-opened', () => mainWindow.webContents.closeDevTools());
     }
+}
+
+// Configuração de logs para o Updater (útil para debug se algo falhar)
+autoUpdater.logger = require("electron-log");
+autoUpdater.logger.transports.file.level = "info";
+
+function setupAutoUpdater(window) {
+    // Verifica se há atualizações assim que o app inicia
+    autoUpdater.checkForUpdatesAndNotify();
+
+    // Evento disparado quando uma atualização é encontrada
+    autoUpdater.on('update-available', () => {
+        window.webContents.send('status-atualizacao', 'Nova versão encontrada. Baixando...');
+    });
+
+    // Evento disparado quando o download termina
+    autoUpdater.on('update-downloaded', (info) => {
+        dialog.showMessageBox({
+            type: 'info',
+            title: 'Atualização Pronta',
+            message: `A versão ${info.version} foi baixada. Deseja reiniciar para atualizar agora?`,
+            buttons: ['Sim, reiniciar', 'Depois']
+        }).then((result) => {
+            if (result.response === 0) {
+                autoUpdater.quitAndInstall();
+            }
+        });
+    });
+
+    // Tratar erros (importante para não travar o app se o GitHub estiver fora)
+    autoUpdater.on('error', (err) => {
+        console.error("Erro no Updater: ", err);
+    });
 }
 
 app.whenReady().then(createWindow);
@@ -617,7 +653,7 @@ ipcMain.handle('get-resumo-gerencial', async (event, filtros) => {
 
     try {
         const dados = db.prepare(sql).all(...params);
-        
+
         // Processa os dados para o formato que sua função renderizarTabelaRelatorio espera
         let volTotalGeral = 0;
         const resumoEspecies = {};
@@ -684,7 +720,7 @@ ipcMain.handle('buscar-dados-relatorio-paginado', async (event, filtros) => {
     }
 
     sql += " ORDER BY t.data_entrada DESC";
-    
+
     // PAGINAÇÃO
     sql += " LIMIT ? OFFSET ?";
     params.push(filtros.limite || 50, filtros.pular || 0);

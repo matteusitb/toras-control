@@ -1,14 +1,17 @@
 {
   "name": "estoque-toras",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "build:protect": "javascript-obfuscator renderer-dev.js --output renderer.js --string-array-encoding base64 --split-strings true --debug-protection true",
+    "release": "npm run build:protect && electron-builder --publish always",
     "dist": "npm run build:protect && electron-builder"
   },
   "dependencies": {
     "better-sqlite3": "^11.0.0",
+    "electron-log": "^5.4.3",
+    "electron-updater": "^6.7.3",
     "node-machine-id": "^1.1.12"
   },
   "rebuild": "electron-rebuild -f -w better-sqlite3",
@@ -20,6 +23,13 @@
     "asar": true,
     "asarUnpack": [
       "**/node_modules/better-sqlite3/**/*"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "MatteusItb",
+        "repo": "toras-control"
+      }
     ],
     "directories": {
       "output": "dist_setup"

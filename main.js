@@ -63,11 +63,13 @@ try { db.exec("ALTER TABLE toras ADD COLUMN status TEXT DEFAULT 'pátio';"); } c
 try { db.exec("ALTER TABLE toras ADD COLUMN data_saida TEXT;"); } catch (e) { }
 
 // --- JANELA PRINCIPAL COM TRAVAS DE PRODUÇÃO ---
+const packageInfo = require('./package.json');const packageInfo = require('./package.json');
 function createWindow() {
     mainWindow = new BrowserWindow({
         width: 1280,
         height: 800,
         minWidth: 1050,
+        title: `${packageInfo.productName} - v${packageInfo.version}`,
         show: false,
         webPreferences: {
             nodeIntegration: true,
@@ -83,6 +85,10 @@ function createWindow() {
     mainWindow.maximize();
     mainWindow.loadFile('index.html');
     mainWindow.once('ready-to-show', () => mainWindow.show());
+    // Opcional: Impedir que o site mude o título (alguns HTMLs sobrescrevem o título)
+    mainWindow.on('page-title-updated', (evt) => {
+      evt.preventDefault();
+    });
 
     if (app.isPackaged) {
         mainWindow.webContents.on('devtools-opened', () => mainWindow.webContents.closeDevTools());

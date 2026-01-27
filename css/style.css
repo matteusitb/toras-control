@@ -1,20 +1,25 @@
 /* IMPORTAÇÃO DA FONTE INTER */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+
 :root {
     /* Paleta Clean / SaaS (Tema Claro) */
     --sidebar-bg: #ffffff;
     --main-bg: #f8faff;
-    --card-bg: #ffffff;           /* Adicionado para os cards */
-    --card-header-bg: #fcfdff;    /* Adicionado para o topo dos forms */
+    --card-bg: #ffffff;
+    /* Adicionado para os cards */
+    --card-header-bg: #fcfdff;
+    /* Adicionado para o topo dos forms */
     --accent-color: #6366f1;
     --active-item-bg: #f0f4ff;
     --text-active: #4f46e5;
     --text-main: #64748b;
     --text-dark: #1e293b;
     --border-color: #eef2f6;
-    --input-bg: #f8fafc;          /* Adicionado para os inputs */
-    --input-border: #f1f5f9;      /* Adicionado para borda de inputs */
-    
+    --input-bg: #f8fafc;
+    /* Adicionado para os inputs */
+    --input-border: #f1f5f9;
+    /* Adicionado para borda de inputs */
+
     /* Configurações */
     --sidebar-width: 280px;
     --transition: all 0.2s ease-in-out;
@@ -22,17 +27,25 @@
 
 /* TEMA ESCURO (Sobrescrevendo as variáveis) */
 body.dark-mode {
-    --sidebar-bg: #1e293b;        /* Sidebar escura */
-    --main-bg: #0f172a;           /* Fundo principal marinho */
-    --card-bg: #1e293b;           /* Cards combinando com sidebar */
-    --card-header-bg: #1e293b;    /* Topo do card igual ao fundo */
-    --accent-color: #818cf8;      /* Indigo mais claro para brilhar no escuro */
+    --sidebar-bg: #1e293b;
+    /* Sidebar escura */
+    --main-bg: #0f172a;
+    /* Fundo principal marinho */
+    --card-bg: #1e293b;
+    /* Cards combinando com sidebar */
+    --card-header-bg: #1e293b;
+    /* Topo do card igual ao fundo */
+    --accent-color: #818cf8;
+    /* Indigo mais claro para brilhar no escuro */
     --active-item-bg: rgba(99, 102, 241, 0.15);
     --text-active: #a5b4fc;
     --text-main: #94a3b8;
-    --text-dark: #f1f5f9;         /* Títulos brancos */
-    --border-color: #334155;      /* Bordas discretas */
-    --input-bg: #0f172a;          /* Fundo do input mais escuro */
+    --text-dark: #f1f5f9;
+    /* Títulos brancos */
+    --border-color: #334155;
+    /* Bordas discretas */
+    --input-bg: #0f172a;
+    /* Fundo do input mais escuro */
     --input-border: #334155;
 }
 
@@ -42,7 +55,8 @@ body.dark-mode {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
-    -webkit-font-smoothing: antialiased; /* Deixa a fonte mais nítida */
+    -webkit-font-smoothing: antialiased;
+    /* Deixa a fonte mais nítida */
     -moz-osx-font-smoothing: grayscale;
 }
 
@@ -52,7 +66,8 @@ body {
     color: var(--text-dark);
     height: 100vh;
     overflow: hidden;
-    letter-spacing: -0.02em; /* Ajuste para fonte ficar igual ao print */
+    letter-spacing: -0.02em;
+    /* Ajuste para fonte ficar igual ao print */
 }
 
 .wrapper {
@@ -61,22 +76,146 @@ body {
     height: 100vh;
 }
 
+.main-wrapper {
+    /* Deve ser o mesmo valor da sua --sidebar-width */
+    margin-left: 260px;
+    transition: margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    padding: 20px;
+    width: auto;
+}
+
+/* Quando o sidebar encolhe, a margem diminui para 80px */
+.main-wrapper.expanded {
+    margin-left: 80px;
+}
+/* Configuração do Tooltip */
+#sidebar.minimized li[data-tooltip] {
+    position: relative;
+}
+
+#sidebar.minimized li[data-tooltip]::after {
+    content: attr(data-tooltip); /* Pega o texto do atributo HTML */
+    position: absolute;
+    left: 100%; /* Aparece à direita do ícone */
+    top: 50%;
+    transform: translateY(-50%);
+    margin-left: 10px;
+    padding: 8px 12px;
+    background: var(--sidebar-bg);
+    color: var(--text-main);
+    font-size: 0.85rem;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    white-space: nowrap;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.2s;
+    pointer-events: none;
+    z-index: 9999;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+}
+
+/* Mostra o balão ao passar o mouse apenas se estiver minimizado */
+#sidebar.minimized li[data-tooltip]:hover::after {
+    opacity: 1;
+    visibility: visible;
+}
+
 /* SIDEBAR */
 #sidebar {
-    min-width: var(--sidebar-width);
-    max-width: var(--sidebar-width);
+    /* Usamos width fixo com transição para permitir o efeito de encolher */
+    width: var(--sidebar-width);
     background: var(--sidebar-bg);
     border-right: 1px solid var(--border-color);
     display: flex;
     flex-direction: column;
     z-index: 10;
+    transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    /* Transição suave */
+    overflow: hidden;
+    /* Garante que o texto não "vaze" ao encolher */
+}
+
+/* Estado Minimizado */
+#sidebar.minimized {
+    width: 80px;
+    min-width: 80px;
+    overflow: visible;
+    /* Sobrescreve a largura padrão */
 }
 
 .sidebar-header {
-    padding: 40px 30px;
+    padding: 40px 24px;
+    /* Reduzi levemente o padding lateral */
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    /* Espaça o logo do botão toggle */
+}
+
+/* Botão de minimizar discreto */
+.btn-toggle-sidebar {
+    background: transparent;
+    border: none;
+    color: var(--text-main);
+    cursor: pointer;
+    padding: 5px;
+    display: flex;
+    align-items: center;
+    transition: var(--transition);
+}
+
+.btn-toggle-sidebar:hover {
+    color: var(--accent-color);
+}
+
+.sidebar-header .logo-area {
     display: flex;
     align-items: center;
     gap: 12px;
+}
+
+/* Controle de visibilidade dos textos */
+.nav-text {
+    white-space: nowrap;
+    opacity: 1;
+    transition: opacity 0.2s;
+}
+
+#sidebar.minimized .nav-text {
+    opacity: 0;
+    display: none;
+    /* Remove do fluxo para não quebrar o layout */
+}
+
+#sidebar.minimized .sidebar-header {
+    padding: 40px 0;
+    justify-content: center;
+    /* Centraliza o ícone do logo no modo mini */
+}
+
+#sidebar.minimized .logo-area span {
+    display: none;
+}
+
+#sidebar.minimized .components li a {
+    justify-content: center;
+    padding: 14px 0;
+}
+
+#sidebar.minimized .components li a i {
+    margin-right: 0;
+    /* Centraliza o ícone Lucide */
+}
+
+#sidebar.minimized .sidebar-footer .btn-sair,
+#sidebar.minimized .sidebar-footer .dark-mode-toggle {
+    justify-content: center;
+    padding: 14px 0;
+}
+
+#sidebar.minimized .sidebar-footer i {
+    margin: 0;
 }
 
 .sidebar-header .logo-icon i {
@@ -89,7 +228,8 @@ body {
 .sidebar-header span {
     font-size: 1.5rem;
     font-weight: 800;
-    letter-spacing: -0.05em; /* Logo bem compactado */
+    letter-spacing: -0.05em;
+    /* Logo bem compactado */
     color: var(--accent-color);
 }
 
@@ -103,6 +243,7 @@ body {
     flex-grow: 1;
     padding: 0 16px;
     list-style: none;
+    overflow: visible !important;
 }
 
 .components li {
@@ -140,7 +281,8 @@ body {
 }
 
 .components li a:hover:not(.active) {
-    background: var(--active-item-bg); /* Usa a cor de item ativo mas sem o destaque */
+    background: var(--active-item-bg);
+    /* Usa a cor de item ativo mas sem o destaque */
     color: var(--text-dark);
 }
 
@@ -178,8 +320,10 @@ body {
 
 /* Estilização dos Selects e suas Opções */
 select.custom-input option {
-    background-color: var(--card-bg); /* Fundo escuro no dark mode */
-    color: var(--text-dark);          /* Texto claro no dark mode */
+    background-color: var(--card-bg);
+    /* Fundo escuro no dark mode */
+    color: var(--text-dark);
+    /* Texto claro no dark mode */
     padding: 10px;
 }
 
@@ -194,6 +338,7 @@ select:focus {
     outline: none;
     box-shadow: 0 0 0 2px var(--accent-color);
 }
+
 /* CONTEÚDO PRINCIPAL */
 #content {
     flex-grow: 1;
@@ -234,13 +379,21 @@ select:focus {
 }
 
 @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(5px); }
-    to { opacity: 1; transform: translateY(0); }
+    from {
+        opacity: 0;
+        transform: translateY(5px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 /* FORMULÁRIOS (FULL WIDTH) */
 .form-card {
-    background: var(--card-bg); /* Tira o #ffffff fixo */
+    background: var(--card-bg);
+    /* Tira o #ffffff fixo */
     border: 1px solid var(--border-color);
     border-radius: 16px;
     width: 100%;
@@ -250,7 +403,8 @@ select:focus {
 
 .form-header {
     padding: 25px 30px;
-   background: var(--card-header-bg); /* Tira o #fcfdff fixo */
+    background: var(--card-header-bg);
+    /* Tira o #fcfdff fixo */
     border-bottom: 1px solid var(--border-color);
     display: flex;
     align-items: center;
@@ -279,7 +433,9 @@ select:focus {
     letter-spacing: 0.08em;
 }
 
-.form-section-title:first-child { margin-top: 0; }
+.form-section-title:first-child {
+    margin-top: 0;
+}
 
 .form-row {
     display: grid;
@@ -300,14 +456,15 @@ select:focus {
     font-weight: 600;
     color: var(--text-dark);
 }
+
 .filtros-estoque {
-    display: grid; 
-    grid-template-columns: 1fr 1fr 1fr auto; 
-    gap: 10px; 
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr auto;
+    gap: 10px;
     /* Trocamos #f8fafc pela variável de fundo de input/seção */
-    background: var(--input-bg); 
-    padding: 15px; 
-    border-radius: 8px; 
+    background: var(--input-bg);
+    padding: 15px;
+    border-radius: 8px;
     margin-bottom: 20px;
     /* Adicionamos uma borda para separar melhor no modo escuro */
     border: 1px solid var(--border-color);
@@ -319,7 +476,8 @@ select:focus {
     padding: 12px 16px;
     border: 2px solid var(--input-border);
     border-radius: 10px;
-   background: var(--input-bg); /* Tira o #f8fafc fixo */
+    background: var(--input-bg);
+    /* Tira o #f8fafc fixo */
     font-family: 'Inter', sans-serif;
     font-size: 0.95rem;
     color: var(--text-dark);
@@ -348,8 +506,9 @@ select:focus {
     min-width: 450px;
     justify-content: space-between;
     align-items: center;
-    color: white; /* Mantemos o texto branco para contraste no Indigo */
-    
+    color: white;
+    /* Mantemos o texto branco para contraste no Indigo */
+
     /* Sombra dinâmica: mais suave no claro, mais profunda no escuro */
     box-shadow: 0 10px 20px rgba(79, 70, 229, 0.15);
     transition: var(--transition);
@@ -430,7 +589,8 @@ body.dark-mode .result-panel {
     text-align: center;
 }
 
-/* ESPÉCIES *//* ESTILO DA TABELA */
+/* ESPÉCIES */
+/* ESTILO DA TABELA */
 .custom-table {
     width: 100%;
     border-collapse: collapse;
@@ -441,7 +601,7 @@ body.dark-mode .result-panel {
     text-align: left;
     padding: 15px 30px;
     /* Substituído o fixo #fcfdff pela variável dinâmica */
-    background: var(--card-header-bg); 
+    background: var(--card-header-bg);
     color: var(--text-main);
     font-weight: 700;
     text-transform: uppercase;
@@ -458,12 +618,14 @@ body.dark-mode .result-panel {
 }
 
 .custom-table tbody tr:hover {
-    background-color: var(--active-item-bg); /* Agora ele usa o azul suave no claro e o marinho no escuro */
+    background-color: var(--active-item-bg);
+    /* Agora ele usa o azul suave no claro e o marinho no escuro */
     transition: background-color 0.2s ease;
 }
 
 /* Botões de Ação na Tabela */
-.btn-icon-edit, .btn-icon-delete {
+.btn-icon-edit,
+.btn-icon-delete {
     background: transparent;
     border: none;
     cursor: pointer;
@@ -473,11 +635,21 @@ body.dark-mode .result-panel {
     margin-left: 5px;
 }
 
-.btn-icon-edit { color: var(--accent-color); }
-.btn-icon-edit:hover { background: var(--active-item-bg); }
+.btn-icon-edit {
+    color: var(--accent-color);
+}
 
-.btn-icon-delete { color: #f87171; }
-.btn-icon-delete:hover { background: rgba(248, 113, 113, 0.1); }
+.btn-icon-edit:hover {
+    background: var(--active-item-bg);
+}
+
+.btn-icon-delete {
+    color: #f87171;
+}
+
+.btn-icon-delete:hover {
+    background: rgba(248, 113, 113, 0.1);
+}
 
 .badge-count {
     background: #f1f5f9;
@@ -489,8 +661,10 @@ body.dark-mode .result-panel {
 }
 
 .badge-volume {
-    background: #ecfdf5; /* Verde bem clarinho */
-    color: #059669;    /* Verde escuro para o texto */
+    background: #ecfdf5;
+    /* Verde bem clarinho */
+    color: #059669;
+    /* Verde escuro para o texto */
     padding: 4px 10px;
     border-radius: 6px;
     font-size: 0.85rem;
@@ -517,7 +691,8 @@ body.dark-mode .result-panel {
    ============================================================ */
 
 #v-baixas .card {
-    background: #ffffff; /* Fundo branco da div mãe */
+    background: #ffffff;
+    /* Fundo branco da div mãe */
     border-radius: 12px;
     border: 1px solid #e2e8f0;
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
@@ -550,7 +725,8 @@ body.dark-mode .result-panel {
 
 #v-baixas .grid-form {
     display: grid;
-    grid-template-columns: 1fr 1fr; /* Lado a lado como no print */
+    grid-template-columns: 1fr 1fr;
+    /* Lado a lado como no print */
     gap: 24px;
     margin-bottom: 30px;
 }
@@ -565,9 +741,11 @@ body.dark-mode .result-panel {
 
 #v-baixas .form-control {
     width: 100%;
-    background-color: #f8fafc; /* Fundo cinza claro conforme print */
+    background-color: #f8fafc;
+    /* Fundo cinza claro conforme print */
     border: 1px solid #e2e8f0;
-    border-radius: 10px;        /* Bordas arredondadas padrão */
+    border-radius: 10px;
+    /* Bordas arredondadas padrão */
     padding: 12px 16px;
     font-size: 1rem;
     color: #1e293b;
@@ -648,7 +826,8 @@ body.dark-mode .result-panel {
 }
 
 #total-volume-baixa {
-    color: #6366f1; /* Roxo padrão */
+    color: #6366f1;
+    /* Roxo padrão */
     font-weight: 700;
 }
 
@@ -667,24 +846,29 @@ body.dark-mode .result-panel {
 
 .baixas-footer-actions {
     display: flex;
-    gap: 15px; /* Espaço entre os botões */
+    gap: 15px;
+    /* Espaço entre os botões */
     margin-top: 25px;
 }
 
 /* Botão Finalizar Baixa (Verde Sucesso) */
 .btn-finalizar-baixa {
-    flex: 1; /* Ocupa o maior espaço disponível */
-    background-color: #10b981; /* Verde esmeralda */
+    flex: 1;
+    /* Ocupa o maior espaço disponível */
+    background-color: #10b981;
+    /* Verde esmeralda */
     color: #ffffff;
     border: none;
-    border-radius: 10px; /* Arredondamento igual ao do print de Lotes */
+    border-radius: 10px;
+    /* Arredondamento igual ao do print de Lotes */
     padding: 14px 24px;
     font-size: 1rem;
     font-weight: 600;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 10px; /* Espaço entre ícone e texto */
+    gap: 10px;
+    /* Espaço entre ícone e texto */
     cursor: pointer;
     transition: all 0.2s ease;
     box-shadow: 0 2px 4px rgba(16, 185, 129, 0.1);
@@ -702,10 +886,13 @@ body.dark-mode .result-panel {
 
 /* Botão Limpar Lista (Cinza Neutro) */
 .btn-limpar-baixa {
-    background-color: #f1f5f9; /* Cinza bem claro */
-    color: #64748b; /* Texto cinza escuro */
+    background-color: #f1f5f9;
+    /* Cinza bem claro */
+    color: #64748b;
+    /* Texto cinza escuro */
     border: 1px solid #e2e8f0;
-    border-radius: 10px; /* Mesmo arredondamento */
+    border-radius: 10px;
+    /* Mesmo arredondamento */
     padding: 14px 24px;
     font-size: 1rem;
     font-weight: 600;
@@ -723,7 +910,7 @@ body.dark-mode .result-panel {
 }
 
 /* Garante que os ícones do Lucide tenham um tamanho consistente */
-.baixas-footer-actions i, 
+.baixas-footer-actions i,
 .baixas-footer-actions svg {
     width: 20px;
     height: 20px;
@@ -746,6 +933,7 @@ body.dark-mode .result-panel {
     font-size: 0.75rem;
     font-weight: 700;
 }
+
 .spinner {
     width: 30px;
     height: 30px;
@@ -757,8 +945,13 @@ body.dark-mode .result-panel {
 }
 
 @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
 }
 
 .table-actions {
@@ -767,7 +960,8 @@ body.dark-mode .result-panel {
     justify-content: flex-end;
 }
 
-.btn-edit-table, .btn-delete-table {
+.btn-edit-table,
+.btn-delete-table {
     border: none;
     padding: 6px;
     border-radius: 6px;
@@ -795,10 +989,12 @@ body.dark-mode .result-panel {
     background: #fee2e2;
 }
 
-.btn-edit-table svg, .btn-delete-table svg {
+.btn-edit-table svg,
+.btn-delete-table svg {
     width: 16px;
     height: 16px;
 }
+
 /* Estilo base para as tags de status */
 .status-tag {
     padding: 4px 10px;
@@ -836,7 +1032,8 @@ body.dark-mode .result-panel {
 
 /* Cores específicas para as marcas de exportação */
 #v-relatorios .btn-pdf {
-    background-color: #ef4444 !important; /* Vermelho Adobe */
+    background-color: #ef4444 !important;
+    /* Vermelho Adobe */
     color: white;
 }
 
@@ -845,7 +1042,8 @@ body.dark-mode .result-panel {
 }
 
 #v-relatorios .btn-excel {
-    background-color: #10b981 !important; /* Verde Excel */
+    background-color: #10b981 !important;
+    /* Verde Excel */
     color: white;
 }
 
@@ -854,7 +1052,8 @@ body.dark-mode .result-panel {
 }
 
 #v-relatorios .btn-preview {
-    background-color: #6366f1 !important; /* Azul Indigo */
+    background-color: #6366f1 !important;
+    /* Azul Indigo */
     color: white;
 }
 
@@ -889,6 +1088,7 @@ body.dark-mode .result-panel {
     margin-bottom: 15px;
     padding-bottom: 10px;
 }
+
 /* Organização da Grid de Filtros */
 #v-relatorios .form-grid {
     display: grid;
@@ -910,7 +1110,8 @@ body.dark-mode .result-panel {
     color: #475569;
 }
 
-#v-relatorios .form-group input, .form-group select {
+#v-relatorios .form-group input,
+.form-group select {
     padding: 8px 12px;
     border: 1px solid #cbd5e1;
     border-radius: 6px;
@@ -942,7 +1143,8 @@ body.dark-mode .result-panel {
 /* Container que envolve a tabela para controle de scroll */
 .table-container {
     width: 100%;
-    overflow-x: auto; /* Garante que em telas menores a tabela não quebre */
+    overflow-x: auto;
+    /* Garante que em telas menores a tabela não quebre */
     margin-top: 15px;
     border: 1px solid #f1f5f9;
     border-radius: 8px;
@@ -1048,10 +1250,11 @@ body.dark-mode .result-panel {
 }
 
 /* No seu arquivo CSS */
-#rel-tabela-corpo td:last-child, 
+#rel-tabela-corpo td:last-child,
 thead th:last-child {
     text-align: right;
-    padding-right: 20px; /* Ajuste este valor conforme o que está no seu JS */
+    padding-right: 20px;
+    /* Ajuste este valor conforme o que está no seu JS */
 }
 
 .dashboard-grid {
@@ -1062,13 +1265,15 @@ thead th:last-child {
 }
 
 .dash-card {
-    background: var(--card-bg); /* Substituído white */
+    background: var(--card-bg);
+    /* Substituído white */
     padding: 20px;
     border-radius: 12px;
     display: flex;
     align-items: center;
     box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
-   border: 1px solid var(--border-color); /* Substituído #f1f5f9 */
+    border: 1px solid var(--border-color);
+    /* Substituído #f1f5f9 */
 }
 
 .dash-icon {
@@ -1083,14 +1288,16 @@ thead th:last-child {
 
 .dash-label {
     font-size: 0.85rem;
-    color: var(--text-main); /* Substituído #64748b */
+    color: var(--text-main);
+    /* Substituído #64748b */
     font-weight: 500;
 }
 
 .dash-info h3 {
     margin: 5px 0;
     font-size: 1.5rem;
-    color: var(--text-main); /* Substituído #94a3b8 */
+    color: var(--text-main);
+    /* Substituído #94a3b8 */
 }
 
 .dash-info p {
@@ -1098,12 +1305,15 @@ thead th:last-child {
     font-size: 0.75rem;
     color: #94a3b8;
 }
+
 .dash-table-container {
-    background: var(--card-bg); /* Substituído white */
+    background: var(--card-bg);
+    /* Substituído white */
     padding: 20px;
     border-radius: 12px;
     box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
-    border: 1px solid var(--border-color); /* Substituído #f1f5f9 */
+    border: 1px solid var(--border-color);
+    /* Substituído #f1f5f9 */
 }
 
 .dash-table-header {
@@ -1122,33 +1332,40 @@ thead th:last-child {
     text-align: left;
     padding: 12px;
     font-size: 0.8rem;
-    color: var(--text-main); /* Substituído #64748b */
-    border-bottom: 2px solid var(--border-color); /* Substituído #f1f5f9 */
+    color: var(--text-main);
+    /* Substituído #64748b */
+    border-bottom: 2px solid var(--border-color);
+    /* Substituído #f1f5f9 */
     text-transform: uppercase;
 }
 
 .dash-table td {
     padding: 12px;
     font-size: 0.9rem;
-    border-bottom: 1px solid var(--border-color); /* Substituído #f8fafc */
-    color: var(--text-dark); /* Substituído #1e293b */
+    border-bottom: 1px solid var(--border-color);
+    /* Substituído #f8fafc */
+    color: var(--text-dark);
+    /* Substituído #1e293b */
 }
 
 .btn-ver-todos {
-    background: var(--input-bg); /* Substituído #f1f5f9 */
+    background: var(--input-bg);
+    /* Substituído #f1f5f9 */
     border: 1px solid var(--border-color);
     padding: 6px 12px;
     border-radius: 6px;
     font-size: 0.75rem;
     cursor: pointer;
-    color: var(--text-main); /* Substituído #475569 */
+    color: var(--text-main);
+    /* Substituído #475569 */
     transition: var(--transition);
 }
 
 .btn-ver-todos:hover {
-   background: var(--active-item-bg);
+    background: var(--active-item-bg);
     color: var(--text-active);
 }
+
 /* Força o alinhamento à direita */
 .text-right {
     text-align: right !important;
@@ -1156,18 +1373,23 @@ thead th:last-child {
 
 /* Opcional: define uma largura máxima para a coluna de data 
    para ela não "fugir" para o canto se a tela for muito larga */
-.dash-table th:last-child, 
+.dash-table th:last-child,
 .dash-table td:last-child {
     text-align: right;
-    white-space: nowrap; /* Impede que a data quebre em duas linhas */
-    width: 150px;       /* Ajuste conforme necessário */
+    white-space: nowrap;
+    /* Impede que a data quebre em duas linhas */
+    width: 150px;
+    /* Ajuste conforme necessário */
 }
+
 .dash-lotes-container {
-    background: var(--card-bg); /* Substituído white */
+    background: var(--card-bg);
+    /* Substituído white */
     padding: 20px;
     border-radius: 12px;
     box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
-    border: 1px solid var(--border-color); /* Substituído #f1f5f9 */
+    border: 1px solid var(--border-color);
+    /* Substituído #f1f5f9 */
 }
 
 .lote-item {
@@ -1189,16 +1411,21 @@ thead th:last-child {
 }
 
 .lote-bar-fill {
-    background: #3b82f6; /* Azul para volume */
+    background: #3b82f6;
+    /* Azul para volume */
     height: 100%;
     border-radius: 4px;
 }
+
 .dashboard-footer {
-    display: grid; 
-    grid-template-columns: 2fr 1fr; /* A tabela ocupa 2 partes e o resumo 1 parte */
-    gap: 20px;                     /* Espaço entre eles */
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    /* A tabela ocupa 2 partes e o resumo 1 parte */
+    gap: 20px;
+    /* Espaço entre eles */
     margin-top: 30px;
-    align-items: start;            /* Alinha os topos */
+    align-items: start;
+    /* Alinha os topos */
 }
 
 /* Garante que em telas pequenas eles fiquem um abaixo do outro */
@@ -1211,14 +1438,16 @@ thead th:last-child {
 #busca-global-numero:focus {
     border-color: #6366f1 !important;
     box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
-    width: 350px !important; /* Ele expande levemente ao focar */
+    width: 350px !important;
+    /* Ele expande levemente ao focar */
 }
 
 /* Ajuste no dashboard botao pesquisa */
 #busca-global-numero:focus {
     border-color: #6366f1;
     box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.1);
-    width: 380px; /* Aumenta levemente a largura ao focar */
+    width: 380px;
+    /* Aumenta levemente a largura ao focar */
 }
 
 #busca-global-numero::placeholder {
@@ -1230,8 +1459,15 @@ thead th:last-child {
 }
 
 @keyframes fadeInDown {
-    from { opacity: 0; transform: translateY(-10px); }
-    to { opacity: 1; transform: translateY(0); }
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 .readonly-field {
@@ -1240,6 +1476,7 @@ thead th:last-child {
     border: 1px dashed #dee2e6 !important;
     cursor: not-allowed;
 }
+
 /* ajuste para rolagem */
 .main-content {
     height: 100vh;
@@ -1253,19 +1490,48 @@ thead th:last-child {
     font-weight: 600;
     text-transform: uppercase;
 }
-.badge-insercao { background: #dcfce7; color: #166534; }
-.badge-exclusao { background: #fee2e2; color: #991b1b; }
-.badge-entrada { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
-.badge-edicao { background: #fef9c3; color: #854d0e; border: 1px solid #fde68a; }
-.badge-baixa { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
-.badge-lote { background: #f3e8ff; color: #6b21a8; border: 1px solid #e9d5ff; }
+
+.badge-insercao {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.badge-exclusao {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.badge-entrada {
+    background: #dcfce7;
+    color: #166534;
+    border: 1px solid #bbf7d0;
+}
+
+.badge-edicao {
+    background: #fef9c3;
+    color: #854d0e;
+    border: 1px solid #fde68a;
+}
+
+.badge-baixa {
+    background: #fee2e2;
+    color: #991b1b;
+    border: 1px solid #fecaca;
+}
+
+.badge-lote {
+    background: #f3e8ff;
+    color: #6b21a8;
+    border: 1px solid #e9d5ff;
+}
 
 /* Container para centralizar o botão */
 .container-acoes-tabela {
     display: flex;
     justify-content: center;
     padding: 30px 0;
-    background: linear-gradient(to bottom, transparent, #f8fafc); /* Suave transição */
+    background: linear-gradient(to bottom, transparent, #f8fafc);
+    /* Suave transição */
 }
 
 /* O Botão Carregar Mais */
@@ -1273,7 +1539,8 @@ thead th:last-child {
     display: flex;
     align-items: center;
     gap: 10px;
-    background-color: #2563eb; /* Azul padrão seu */
+    background-color: #2563eb;
+    /* Azul padrão seu */
     color: white;
     padding: 12px 24px;
     border-radius: 8px;
@@ -1285,7 +1552,8 @@ thead th:last-child {
 }
 
 .btn-carregar-mais:hover {
-    background-color: #1d4ed8; /* Azul um pouco mais escuro */
+    background-color: #1d4ed8;
+    /* Azul um pouco mais escuro */
     transform: translateY(-2px);
     box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.2);
 }
@@ -1298,9 +1566,15 @@ thead th:last-child {
     width: 18px;
     height: 18px;
 }
+
 @keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 .animate-spin {

@@ -29,46 +29,52 @@
     <div class="wrapper">
         <nav id="sidebar">
             <div class="sidebar-header">
-                <div class="logo-icon"><i data-lucide="zap"></i></div>
-                <span>MT <strong>PRÓ</strong></span>
+                <div class="logo-area">
+                    <div class="logo-icon"><i data-lucide="zap"></i></div>
+                    <span class="nav-text">MT <strong>PRÓ</strong></span>
+                </div>
+                <button class="btn-toggle-sidebar" onclick="toggleSidebar()">
+                    <i data-lucide="chevron-left" id="icon-toggle"></i>
+                </button>
             </div>
 
             <ul class="components">
-                <li class="active" onclick="carregarTela('home', this)">
-                    <a href="#"><i data-lucide="layout-grid"></i> Dashboard</a>
+                <li class="active" onclick="carregarTela('home', this)" data-tooltip="Dashboard">
+                    <a href="#"><i data-lucide="layout-grid"></i> <span class="nav-text">Dashboard</span></a>
                 </li>
-                <li onclick="carregarTela('especies', this)">
-                    <a href="#"><i data-lucide="leaf"></i> Cadastro de Espécies</a>
+                <li onclick="carregarTela('especies', this)" data-tooltip="Espécies">
+                    <a href="#"><i data-lucide="leaf"></i> <span class="nav-text">Cadastro de Espécies</span></a>
                 </li>
-                <li onclick="carregarTela('lotes', this)">
-                    <a href="#"><i data-lucide="layers"></i> Cadastro de Lotes</a>
+                <li onclick="carregarTela('lotes', this)" data-tooltip="Lotes">
+                    <a href="#"><i data-lucide="layers"></i> <span class="nav-text">Cadastro de Lotes</span></a>
                 </li>
-                <li onclick="carregarTela('entradas', this)">
-                    <a href="#"><i data-lucide="arrow-down-left"></i> Entradas no Estoque</a>
+                <li onclick="carregarTela('entradas', this)" data-tooltip="Entradas">
+                    <a href="#"><i data-lucide="arrow-down-left"></i> <span class="nav-text">Entradas no
+                            Estoque</span></a>
                 </li>
-                <li onclick="carregarTela('baixas', this)">
-                    <a href="#"><i data-lucide="arrow-up-right"></i> Baixas de Estoque</a>
+                <li onclick="carregarTela('baixas', this)" data-tooltip="Baixas">
+                    <a href="#"><i data-lucide="arrow-up-right"></i> <span class="nav-text">Baixas de Estoque</span></a>
                 </li>
-                <li onclick="carregarTela('estoque', this)">
-                    <a href="#"><i data-lucide="database"></i> Estoque Geral</a>
+                <li onclick="carregarTela('estoque', this)" data-tooltip="Estoque">
+                    <a href="#"><i data-lucide="database"></i> <span class="nav-text">Estoque Geral</span></a>
                 </li>
-                <li onclick="carregarTela('relatorios', this)">
-                    <a href="#"><i data-lucide="file-text"></i> Relatórios Gerenciais</a>
+                <li onclick="carregarTela('relatorios', this)" data-tooltip="Relatórios">
+                    <a href="#"><i data-lucide="file-text"></i> <span class="nav-text">Relatórios Gerenciais</span></a>
                 </li>
-                <li onclick="carregarTela('logs', this)">
-                    <a href="#"><i data-lucide="scroll-text"></i> Log de Sistemas</a>
+                <li onclick="carregarTela('logs', this)" data-tooltip="Logs">
+                    <a href="#"><i data-lucide="scroll-text"></i> <span class="nav-text">Log de Sistemas</span></a>
                 </li>
-                <li onclick="carregarTela('configuracoes', this)">
-                    <a href="#"><i data-lucide="settings"></i> Configurações</a>
+                <li onclick="carregarTela('configuracoes', this)" data-tooltip="Configurações">
+                    <a href="#"><i data-lucide="settings"></i> <span class="nav-text">Configurações</span></a>
                 </li>
             </ul>
 
             <div class="sidebar-footer">
                 <a href="#" class="btn-sair" onclick="window.close()">
-                    <i data-lucide="log-out"></i> Sair
+                    <i data-lucide="log-out"></i> <span class="nav-text">Sair</span>
                 </a>
                 <div class="dark-mode-toggle">
-                    <i data-lucide="moon"></i> <span>Modo Escuro</span>
+                    <i data-lucide="moon"></i> <span class="nav-text">Modo Escuro</span>
                 </div>
             </div>
         </nav>
@@ -178,7 +184,8 @@
                             <div class="header-icon"><i data-lucide="plus-circle"></i></div>
                             <div>
                                 <h3>Nova Entrada de Tora</h3>
-                                <p>Dê entrada de Toras nos seus Pátios, medidgit commit -m "Melhoria no main e mostrar versao do app v4"as padrão, RODO, COMPRIMENTO, DESCONTOS</p>
+                                <p>Dê entrada de Toras nos seus Pátios, medidgit commit -m "Melhoria no main e mostrar
+                                    versao do app v4"as padrão, RODO, COMPRIMENTO, DESCONTOS</p>
                             </div>
                         </div>
                         <div class="form-body">

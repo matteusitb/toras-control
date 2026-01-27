@@ -2317,3 +2317,23 @@ function aplicarMascaraNumero(input) {
         input.value = numeroLimpo.toString();
     }
 }
+function toggleSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const mainWrapper = document.querySelector('.main-wrapper'); // Ajuste o nome da classe aqui
+    const icon = document.getElementById('icon-toggle');
+    
+    // Alterna as classes de largura
+    sidebar.classList.toggle('minimized');
+    if (mainWrapper) {
+        mainWrapper.classList.toggle('expanded');
+    }
+    
+    // Atualiza o ícone da seta e re-renderiza o Lucide
+    if (sidebar.classList.contains('minimized')) {
+        icon.setAttribute('data-lucide', 'chevron-right');
+    } else {
+        icon.setAttribute('data-lucide', 'chevron-left');
+    }
+    
+    lucide.createIcons();
+}

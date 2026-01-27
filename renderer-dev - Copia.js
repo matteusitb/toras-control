@@ -23,7 +23,7 @@ document.getElementById('btn-activar').addEventListener('click', () => {
 
     if (chaveDigitada === chaveEsperada) {
         // 3. SE CORRETA: Definimos onde salvar
-        const pastaLicenca = path.join(process.env.APPDATA, 'gestao-toras');
+        const pastaLicenca = path.join(process.env.APPDATA, 'estoque-toras');
         const arquivoLicenca = path.join(pastaLicenca, 'license.dat');
 
         try {
@@ -81,7 +81,56 @@ function tratarErroIpc(err) {
 
 
 // --- NAVEGAÇÃO ENTRE VIEWS ---
-function carregarTela(viewName, element) {
+let formularioSujo = false;
+let telaAtual = 'home'; // Rastreia de onde o usuário está saindo
+
+// Monitorar mudanças em qualquer formulário
+document.addEventListener('input', (e) => {
+    // 1. Verifica se o input está dentro da Home (Dashboard) ou se é a busca global
+    const isHome = e.target.closest('#v-home');
+    const isBuscaGlobal = e.target.id === 'busca-global-numero';
+
+    // Só marca como sujo se NÃO for da home e NÃO for a busca global
+    if (e.isTrusted && e.target.closest('.view') && !isHome && !isBuscaGlobal) {
+        formularioSujo = true;
+    }
+});
+
+async function carregarTela(viewName, element) {
+    // 1. LISTA DE EXCEÇÕES: Telas que não disparam o aviso ao SAIR delas
+    const viewsSemAviso = ['home', 'estoque', 'relatorios', 'logs', 'configuracoes'];
+
+    // 2. TRAVA DE SEGURANÇA: Só pergunta se a tela de ORIGEM não for isenta
+    if (formularioSujo && !viewsSemAviso.includes(telaAtual)) {
+        const resultado = await Swal.fire({
+            title: 'Alterações não salvas',
+            text: "Você preencheu dados neste formulário. Deseja realmente sair e descartar as alterações?",
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#2563eb',
+            cancelButtonColor: '#d33',
+            confirmButtonText: 'Sim, sair',
+            cancelButtonText: 'Ficar aqui'
+        });
+
+        if (!resultado.isConfirmed) return; // Cancela a navegação
+    }
+
+    // --- 3. POWER RESET: LIMPEZA TOTAL DE INPUTS ---
+    const todosOsInputs = document.querySelectorAll('input, select, textarea');
+    todosOsInputs.forEach(campo => {
+        if (campo.tagName === 'SELECT') {
+            campo.selectedIndex = 0;
+        } else {
+            campo.value = '';
+        }
+    });
+
+    // Resetamos a trava e atualizamos a tela atual para a próxima navegação
+    formularioSujo = false;
+    telaAtual = viewName;
+
+    // --- 4. INTERFACE: TROCA DE VISIBILIDADE ---
     document.querySelectorAll('.components li').forEach(li => li.classList.remove('active'));
     if (element) element.classList.add('active');
 
@@ -89,6 +138,7 @@ function carregarTela(viewName, element) {
     const target = document.getElementById('v-' + viewName);
     if (target) target.classList.add('active');
 
+    // Títulos conforme o layout definido [cite: 2026-01-16]
     const nomes = {
         'home': 'Dashboard',
         'especies': 'Cadastro de Espécies',
@@ -102,26 +152,64 @@ function carregarTela(viewName, element) {
     };
     document.getElementById('view-title').innerText = nomes[viewName] || 'ToraControl';
 
-    // Gatilhos específicos por tela
-    if (viewName === 'home') {
-        atualizarDashboard(); // Chamada para preencher os cards
-    } else if (viewName === 'estoque') {
-        carregarEstoque(true);
-    } else if (viewName === 'especies') {
-        carregarEspecies();
-    } else if (viewName === 'lotes') {
-        carregarLotes();
-    } else if (viewName === 'entradas') {
-        carregarEspecies();
-        carregarLotes();
-        carregarTorasRecentes();
-    } else if (viewName === 'relatorios') {
-        carregarFiltrosRelatorio();
-    } else if (viewName === 'logs') {
-        carregarLogs();
+    // --- 5. GATILHOS DE CARREGAMENTO (DATABASE) ---
+    try {
+        switch (viewName) {
+            case 'home':
+                if (typeof atualizarDashboard === 'function') atualizarDashboard();
+                break;
+
+            case 'especies':
+                if (typeof carregarEspecies === 'function') await carregarEspecies();
+                break;
+
+            case 'lotes':
+                if (typeof carregarLotes === 'function') await carregarLotes();
+                break;
+
+            case 'entradas':
+                // Carregamento para novas toras [cite: 2026-01-20]
+                if (typeof carregarEspecies === 'function') await carregarEspecies();
+                if (typeof carregarLotes === 'function') await carregarLotes();
+                if (typeof listarTorasRecentes === 'function') await listarTorasRecentes();
+                break;
+
+            case 'estoque':
+                if (typeof carregarEstoque === 'function') await carregarEstoque(true);
+                break;
+
+            case 'relatorios':
+                if (typeof carregarFiltrosRelatorio === 'function') await carregarFiltrosRelatorio();
+                break;
+
+            case 'logs':
+                if (typeof carregarLogs === 'function') await carregarLogs();
+                break;
+        }
+    } catch (err) {
+        console.error(`Erro ao processar dados da view ${viewName}:`, err);
     }
 
-    lucide.createIcons();
+    // Renderiza ícones Lucide
+    if (window.lucide) {
+        lucide.createIcons();
+    }
+}
+
+function limparFormularioTora() {
+    const form = document.getElementById('form-entrada-tora'); // Use seu ID real
+    if (form) form.reset();
+
+    // Limpar IDs ocultos de edição
+    const inputId = document.getElementById('tora-id-edicao');
+    if (inputId) inputId.value = '';
+
+    // Resetar título para estado inicial
+    const btnSalvar = document.getElementById('btn-salvar-tora');
+    if (btnSalvar) btnSalvar.innerText = 'Cadastrar Tora';
+
+    // RESETAR A TRAVA: Essencial para o carregarTela não perguntar nada na próxima vez
+    formularioSujo = false;
 }
 
 // 1. MÁSCARAS E UTILITÁRIOS
@@ -346,153 +434,246 @@ async function excluirLote(id) {
 
 // --- GESTÃO DE TORAS (ENTRADAS) ---
 function calcularCubagem() {
-    // Captura os elementos
-    const rodoInput = document.getElementById('rodo');
-    const d1Input = document.getElementById('d1');
-    const d2Input = document.getElementById('d2');
-    const compInput = document.getElementById('comprimento');
-    const descVerInput = document.getElementById('total-desconto-ver');
-    const resH2 = document.getElementById('volume-result');
+    // Usando sua função padrão para garantir números limpos
+    const rodo = obterValorLimpo('rodo');
+    const d1 = obterValorLimpo('d1');
+    const d2 = obterValorLimpo('d2');
+    const comp = obterValorLimpo('comprimento');
     const detalheSmall = document.getElementById('detalhe-calculo');
 
-    // Converte valores (Tratando vazio como 0 e vírgula como ponto)
-    const rodo = parseFloat(rodoInput.value) || 0;
-    const d1 = parseFloat(d1Input.value) || 0;
-    const d2 = parseFloat(d2Input.value) || 0;
-    const comp = parseFloat(compInput.value.replace(',', '.')) || 0;
-
-    // A. CÁLCULO DO OCO (Sempre calcula se houver medidas de desconto e comprimento)
-    // Regra: (D1 * D2 * Comprimento) / 10.000 -> Truncado na 3ª casa
+    // 1. CÁLCULO DO OCO (Truncamento na 3ª casa)
     const volOcoRaw = (d1 * d2 * comp) / 10000;
     const volOcoTrunc = Math.floor(volOcoRaw * 1000) / 1000;
 
-    // Atualiza campo Tot. Desconto (Visual)
-    descVerInput.value = volOcoTrunc.toFixed(3).replace('.', ',');
+    document.getElementById('total-desconto-ver').value = volOcoTrunc.toFixed(3).replace('.', ',');
 
-    // B. CÁLCULO DA TORA (QUARTO DO RODO)
+    // 2. CÁLCULO DA TORA (Quarto do Rodo) [cite: 2026-01-20]
     if (rodo > 0 && comp > 0) {
-        // Lado = Parte inteira da divisão por 4
         const lado = Math.floor(rodo / 4);
-
-        // Volume Bruto = (Lado² * Comp) / 10.000 -> Truncado na 3ª casa
         const volBrutoRaw = (lado * lado * comp) / 10000;
         const volBrutoTrunc = Math.floor(volBrutoRaw * 1000) / 1000;
-
-        // Volume Líquido = Bruto - Oco
         const volumeFinal = (volBrutoTrunc - volOcoTrunc).toFixed(3);
 
-        // Atualiza a tela
-        resH2.innerText = volumeFinal.replace('.', ',') + " m³";
-        detalheSmall.innerText = `Lado: ${lado}cm | Bruto: ${volBrutoTrunc.toFixed(3)} m³ | Oco: ${volOcoTrunc.toFixed(3)} m³`;
-
+        document.getElementById('volume-result').innerText = volumeFinal.replace('.', ',') + " m³";
+        detalheSmall.innerText = ` Bruto: ${volBrutoTrunc.toFixed(3)} m³ | Oco: ${volOcoTrunc.toFixed(3)} m³`;
         return { liquido: volumeFinal, oco: volOcoTrunc };
     } else {
-        resH2.innerText = "0,000 m³";
-        detalheSmall.innerText = "";
+        document.getElementById('volume-result').innerText = "0,000 m³";
         return { liquido: "0.000", oco: volOcoTrunc };
     }
 }
 
 // 3. FUNÇÃO SALVAR (INTEGRADA)
 async function salvarTora() {
+    // 1. Garante o cálculo mais recente antes de capturar os dados
     const calc = calcularCubagem();
-    const id = document.getElementById('tora-id').value;
+    const idExistente = document.getElementById('tora-id').value;
 
-    const dados = {
-        id: id || null,
-        codigo: document.getElementById('tora-codigo').value, // Número [cite: 2026-01-17]
+    // 2. Monta o objeto usando obterValorLimpo para garantir a precisão numérica
+    const tora = {
+        id: idExistente || null,
+        codigo: document.getElementById('tora-codigo').value, // Nosso "Número" [cite: 2026-01-17]
         especie_id: document.getElementById('tora-especie').value,
         lote_id: document.getElementById('tora-lote').value,
-        rodo: parseInt(document.getElementById('rodo').value) || 0,
-        desconto_1: parseInt(document.getElementById('d1').value) || 0,
-        desconto_2: parseInt(document.getElementById('d2').value) || 0,
+        rodo: obterValorLimpo('rodo'),
+        desconto_1: obterValorLimpo('d1'),
+        desconto_2: obterValorLimpo('d2'),
         total_desconto: parseFloat(calc.oco),
-        comprimento: parseFloat(document.getElementById('comprimento').value.replace(',', '.')) || 0,
+        comprimento: obterValorLimpo('comprimento'),
         volume: parseFloat(calc.liquido)
     };
 
-    if (!dados.codigo || !dados.rodo || !dados.comprimento) {
-        return Swal.fire('Atenção', 'Preencha os campos obrigatórios da tora.', 'warning');
+    // 3. Validação de campos obrigatórios
+    if (!tora.codigo || !tora.especie_id || !tora.lote_id || tora.rodo <= 0 || tora.comprimento <= 0) {
+        Swal.fire({
+            icon: 'warning',
+            title: 'Atenção',
+            text: 'Preencha o Número, Espécie, Lote, Rodo e Comprimento para continuar.',
+            confirmButtonColor: '#2563eb'
+        });
+        return;
     }
 
     try {
-        const canal = id ? 'editar-tora' : 'nova-tora';
-        const res = await window.api.invoke(canal, dados);
-        if (res.success) {
-            Swal.fire('Sucesso!', 'Tora salva com sucesso.', 'success');
+        // 4. Define se é uma nova entrada ou edição
+        const canal = idExistente ? 'editar-tora' : 'salvar-tora';
+        const result = await window.api.invoke(canal, tora);
+
+        if (result.success) {
+            // --- AJUSTE DE SEGURANÇA ---
+            // Como salvamos com sucesso, o formulário não está mais "sujo"
+            formularioSujo = false;
+
+            Swal.fire({
+                icon: 'success',
+                title: idExistente ? 'Tora Atualizada' : 'Tora Registrada',
+                text: `Tora número ${tora.codigo} salva com sucesso!`,
+                timer: 1500,
+                showConfirmButton: false
+            });
+
+            // 5. Limpa o formulário e atualiza a listagem
+            // Certifique-se que resetFormEntrada() também defina formularioSujo = false
             resetFormEntrada();
-            // carregarUltimasEntradas(); // Chamar sua função de atualizar tabela
+            listarTorasRecentes();
         }
-    } catch (e) {
-        Swal.fire('Erro', e.message, 'error');
+    } catch (err) {
+        console.error('Erro ao salvar:', err);
+        Swal.fire('Erro no Sistema', err.message, 'error');
     }
 }
 
-async function carregarTorasRecentes() {
-    const toras = await window.api.invoke('listar-toras-recentes');
-    const tbody = document.getElementById('lista-entradas-recentes');
-    if (tbody) {
-        tbody.innerHTML = toras.map(t => `
-            <tr>
-                <td><strong>${t.codigo}</strong></td>
-                <td>${t.especie_nome}</td>
-                <td><span class="badge-count">${t.lote_numero}</span></td>
-                <td>${t.m1}x${t.m2} - ${t.comprimento.toFixed(2)}m</td>
-                <td><span class="badge-volume">${t.volume.toLocaleString('pt-BR', { minimumFractionDigits: 3 })} m³</span></td>
-                <td style="text-align: right;">
-                    <button class="btn-icon-edit" onclick="prepararEdicaoTora('${encodeURIComponent(JSON.stringify(t))}')"><i data-lucide="pencil"></i></button>
-                    <button class="btn-icon-delete" onclick="confirmarExclusaoTora(${t.id}, '${t.codigo}')"><i data-lucide="trash-2"></i></button>
+async function listarTorasRecentes() {
+    try {
+        const toras = await window.api.invoke('listar-toras-recentes');
+        const tbody = document.getElementById('lista-entradas-recentes');
+        if (!tbody) return;
+
+        tbody.innerHTML = '';
+
+        toras.forEach(tora => {
+            // Formatação do Oco: Medidas (D1 x D2) - Volume do Desconto
+            // Só exibe o detalhamento se houver medidas cadastradas
+            let ocoDisplay = "---";
+            if (tora.desconto_1 > 0 || tora.desconto_2 > 0) {
+                const volDesc = tora.total_desconto ? tora.total_desconto.toFixed(3).replace('.', ',') : "0,000";
+                ocoDisplay = `${tora.desconto_1}x${tora.desconto_2} - ${volDesc} m³`;
+            }
+
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td><span class="badge-numero">${tora.codigo || '---'}</span></td>
+                <td>${tora.especie_nome || '---'}</td>
+                <td>${tora.lote_numero || '---'}</td>
+                <td>R: ${tora.rodo} | C: ${tora.comprimento.toFixed(2)}</td>
+                <td style="color: ${tora.total_desconto > 0 ? '#e11d48' : 'inherit'}; font-size: 0.9em;">
+                    ${ocoDisplay}
                 </td>
-            </tr>`).join('');
-        lucide.createIcons();
+                <td style="font-weight: bold;">${tora.volume.toFixed(3).replace('.', ',')} m³</td>
+                <td style="text-align: right;">
+                    <button class="btn-icon-edit" onclick="prepararEdicaoTora('${encodeURIComponent(JSON.stringify(tora))}')">
+                     <i data-lucide="pencil"></i>
+                    </button>
+                    <button class="btn-icon-delete" onclick="confirmarExclusaoTora(${tora.id})">
+                        <i data-lucide="trash-2"></i>
+                    </button>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+        if (window.lucide) window.lucide.createIcons();
+    } catch (err) {
+        console.error("Erro ao listar toras:", err);
     }
 }
 
 function prepararEdicaoTora(json) {
     const t = JSON.parse(decodeURIComponent(json));
 
-    // REGRA DE OURO: Bloqueio para toras já baixadas (Ponto 1 do Estoque Geral)
+    // REGRA DE OURO: Bloqueio para toras já baixadas
     if (t.status === 'serrada') {
         Swal.fire('Bloqueado', 'Esta tora já foi serrada e não pode mais ser editada.', 'warning');
         return;
     }
 
+    // Navega para a view de entradas mantendo o padrão do sistema
     carregarTela('entradas', document.querySelector('li[onclick*="entradas"]'));
 
-    // Preenchimento de IDs e Textos
+    // Preenchimento dos IDs e Campos de Identificação
     document.getElementById('tora-id').value = t.id;
-    document.getElementById('tora-codigo').value = t.codigo;
-    document.getElementById('m1').value = t.m1;
-    document.getElementById('m2').value = t.m2;
-    document.getElementById('comprimento').value = t.comprimento.toFixed(2).replace('.', ',');
+    document.getElementById('tora-codigo').value = t.codigo; // Número [cite: 2026-01-17]
 
-    // CORREÇÃO (Ponto 1 e 2): Popular espécie e lote
-    // Usamos um pequeno timeout para garantir que os selects existam na tela de entrada
+    // Preenchimento das Novas Medidas de Cubagem e Desconto [cite: 2026-01-21]
+    document.getElementById('rodo').value = t.rodo || 0;
+    document.getElementById('d1').value = t.desconto_1 || 0;
+    document.getElementById('d2').value = t.desconto_2 || 0;
+
+    // Tratamento de decimais para o Comprimento
+    document.getElementById('comprimento').value = t.comprimento ? t.comprimento.toFixed(2).replace('.', ',') : "0,00";
+
+    // Popular espécie e lote com timeout para garantir o carregamento do DOM
     setTimeout(() => {
         if (document.getElementById('tora-especie')) document.getElementById('tora-especie').value = t.especie_id;
         if (document.getElementById('tora-lote')) document.getElementById('tora-lote').value = t.lote_id;
-        calcularCubagem();
-    }, 50);
 
-    document.getElementById('btn-salvar-tora').querySelector('span').innerText = "Atualizar Tora";
-    document.getElementById('btn-cancelar-tora').style.display = "block";
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+        // Recalcula o volume líquido e o total de desconto em tempo real
+        calcularCubagem();
+    }, 100);
+
+    // Ajuste visual dos botões para modo Edição
+    const btnSalvar = document.getElementById('btn-salvar-tora');
+    if (btnSalvar) {
+        btnSalvar.querySelector('span').innerText = "Atualizar Tora";
+        const icone = btnSalvar.querySelector('i');
+        if (icone) icone.setAttribute('data-lucide', 'save');
+    }
+
+    const btnCancelar = document.getElementById('btn-cancelar-tora');
+    if (btnCancelar) btnCancelar.style.display = "block";
+
+    // Refaz ícones do Lucide
+    if (window.lucide) window.lucide.createIcons();
+
+    // Ajuste: Aguarda um instante para a tela carregar antes de rolar
+    setTimeout(() => {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+
+        // Opcional: Coloca o foco no campo Número [cite: 2026-01-17]
+        const input = document.getElementById('tora-codigo');
+        if (input) input.focus();
+    }, 100);
 }
 
 function resetFormEntrada() {
-    // CORREÇÃO (Ponto 3): Limpeza total incluindo espécie e lote
-    ['tora-id', 'tora-codigo', 'm1', 'm2', 'comprimento'].forEach(id => {
+    // 1. Limpeza dos campos de entrada e ocultos
+    const campos = [
+        'tora-id',
+        'tora-codigo',
+        'rodo',
+        'd1',
+        'd2',
+        'total-desconto-ver',
+        'comprimento'
+    ];
+
+    campos.forEach(id => {
         const el = document.getElementById(id);
         if (el) el.value = "";
     });
 
-    // Reseta os seletores para o primeiro item (Selecione...)
+    // 2. Reseta os seletores de Espécie e Lote
     if (document.getElementById('tora-especie')) document.getElementById('tora-especie').selectedIndex = 0;
     if (document.getElementById('tora-lote')) document.getElementById('tora-lote').selectedIndex = 0;
 
-    document.getElementById('volume-result').innerText = "0,000 m³";
-    document.getElementById('btn-salvar-tora').querySelector('span').innerText = "Confirmar Entrada";
-    document.getElementById('btn-cancelar-tora').style.display = "none";
+    // 3. ZERA OS PAINÉIS DE RESULTADO (Volume e Detalhes)
+    const volRes = document.getElementById('volume-result');
+    if (volRes) volRes.innerText = "0,000 m³";
+
+    // Reseta o detalhe do cálculo (Lado, Bruto, Oco)
+    const detalheCalc = document.getElementById('detalhe-calculo');
+    if (detalheCalc) detalheCalc.innerText = "";
+
+    // 4. Restaura o estado original dos botões
+    const btnSalvar = document.getElementById('btn-salvar-tora');
+    if (btnSalvar) {
+        const span = btnSalvar.querySelector('span');
+        if (span) span.innerText = "Confirmar Entrada";
+
+        const icone = btnSalvar.querySelector('i');
+        if (icone) {
+            icone.setAttribute('data-lucide', 'check');
+        }
+    }
+
+    const btnCancelar = document.getElementById('btn-cancelar-tora');
+    if (btnCancelar) btnCancelar.style.display = "none";
+
+    // 5. Atualiza ícones e foca no campo Número [cite: 2026-01-17]
+    if (window.lucide) window.lucide.createIcons();
+
+    const inputCodigo = document.getElementById('tora-codigo');
+    if (inputCodigo) inputCodigo.focus();
 }
 
 async function confirmarExclusaoTora(id, codigo, status) {
@@ -522,7 +703,7 @@ async function confirmarExclusaoTora(id, codigo, status) {
             if (res && res.success) {
                 avisar('success', `Tora Número ${codigo} removida.`);
                 resetFormEntrada();
-                carregarTorasRecentes();
+                listarTorasRecentes();
                 if (document.getElementById('v-estoque').classList.contains('active')) carregarEstoque();
             } else {
                 // Se o backend retornar erro, tratamos aqui
@@ -546,45 +727,78 @@ let listaParaBaixa = [];
 
 async function buscarEAdicionarALista() {
     const codigoInput = document.getElementById('buscar-tora-codigo');
-    aplicarMascaraNumero(codigoInput);
+    // Aplica a máscara para manter o padrão de 3 dígitos se necessário
+    if (typeof aplicarMascaraNumero === 'function') aplicarMascaraNumero(codigoInput);
+
     const codigo = codigoInput.value.trim();
     if (!codigo) return;
+
     if (listaParaBaixa.some(t => t.codigo === codigo)) {
         codigoInput.value = '';
-        return avisar('warning', 'Esta tora já está na lista de saída.');
+        return Swal.fire('Atenção', 'Esta tora já está na lista de saída.', 'warning');
     }
+
     try {
         const tora = await window.api.invoke('buscar-tora-por-codigo', codigo);
-        if (tora) {
+        // Só permite adicionar se a tora estiver 'pátio'
+        if (tora && tora.status === 'pátio') {
             listaParaBaixa.push(tora);
             atualizarTabelaTemporaria();
             codigoInput.value = '';
             codigoInput.focus();
+        } else if (tora && tora.status === 'serrada') {
+            Swal.fire('Bloqueado', 'Esta tora já consta como serrada/baixada.', 'error');
         } else {
-            Swal.fire('Não encontrada', 'Tora não existe no pátio.', 'warning');
+            Swal.fire('Não encontrada', 'Número de tora não localizado no pátio.', 'warning');
         }
-    } catch (err) { avisar('error', 'Erro ao localizar tora.'); }
+    } catch (err) {
+        console.error(err);
+        Swal.fire('Erro', 'Falha ao localizar dados da tora.', 'error');
+    }
 }
 
 function atualizarTabelaTemporaria() {
     const tbody = document.getElementById('lista-baixa-temporaria');
+    if (!tbody) return;
+
     let totalVol = 0;
-    tbody.innerHTML = listaParaBaixa.map((t, index) => {
-        totalVol += t.volume;
-        return `<tr>
-            <td><strong>${t.codigo}</strong></td>
-            <td>${t.especie_nome}</td>
-            <td>${t.lote_numero}</td>
-            <td>${t.m1}x${t.m2} - ${t.comprimento.toFixed(2)}m</td>
-            <td>${t.volume.toLocaleString('pt-BR', { minimumFractionDigits: 3 })}</td>
-            <td style="text-align: right;">
-                <button class="btn-icon-delete" onclick="removerDaLista(${index})"><i data-lucide="x"></i></button>
-            </td>
-        </tr>`;
+
+    tbody.innerHTML = listaParaBaixa.map((tora, index) => {
+        totalVol += tora.volume;
+
+        // Montagem da string de medidas
+        // Padrão: R: 180 | C: 4,50
+        let medidasDisplay = `R: ${tora.rodo} | C: ${tora.comprimento.toFixed(2)}`;
+
+        // Se houver oco, adicionamos logo abaixo ou ao lado
+        if (tora.desconto_1 > 0 || tora.desconto_2 > 0) {
+            medidasDisplay += ` <br><small style="color: #e11d48;">Oco: ${tora.desconto_1}x${tora.desconto_2}</small>`;
+        }
+
+        return `
+            <tr>
+                <td><span class="badge-numero">${tora.codigo}</span></td>
+                <td>${tora.especie_nome}</td>
+                <td>${tora.lote_numero || '---'}</td>
+                <td>${medidasDisplay}</td>
+                <td style="font-weight: bold;">${tora.volume.toFixed(3).replace('.', ',')}</td>
+                <td style="text-align: right;">
+                    <button class="btn-icon-delete" onclick="removerDaLista(${index})">
+                        <i data-lucide="x"></i>
+                    </button>
+                </td>
+            </tr>`;
     }).join('');
-    document.getElementById('total-volume-baixa').innerText = totalVol.toLocaleString('pt-BR', { minimumFractionDigits: 3 }) + " m³";
-    document.getElementById('total-toras-baixa').innerText = listaParaBaixa.length + " toras";
-    lucide.createIcons();
+
+    // Atualiza os totais do painel lateral/inferior
+    const elVol = document.getElementById('total-volume-baixa');
+    const elQtd = document.getElementById('total-toras-baixa');
+
+    if (elVol) elVol.innerText = totalVol.toFixed(3).replace('.', ',') + " m³";
+    if (elQtd) elQtd.innerText = listaParaBaixa.length + " toras";
+
+    // Reinicializa os ícones do Lucide (o "X" de remover)
+    if (window.lucide) lucide.createIcons();
 }
 
 function removerDaLista(index) {
@@ -600,7 +814,6 @@ function limparListaTemporaria() {
 async function processarBaixaEGerarPDF() {
     const dataSaida = document.getElementById('saida-data').value;
 
-    // Validação de segurança
     if (!dataSaida || listaParaBaixa.length === 0) {
         return Swal.fire('Atenção', 'Selecione a data e adicione toras para o romaneio.', 'warning');
     }
@@ -621,34 +834,30 @@ async function processarBaixaEGerarPDF() {
         const ids = listaParaBaixa.map(t => t.id);
         const totalVolumeGeral = listaParaBaixa.reduce((acc, t) => acc + t.volume, 0);
 
-        // --- LÓGICA DE AGRUPAMENTO POR ESPÉCIE ---
+        // Agrupamento para o resumo
         const resumoEspecies = {};
         listaParaBaixa.forEach(tora => {
             const nome = tora.especie_nome;
-            if (!resumoEspecies[nome]) {
-                resumoEspecies[nome] = { volume: 0, qtd: 0 };
-            }
+            if (!resumoEspecies[nome]) resumoEspecies[nome] = { volume: 0, qtd: 0 };
             resumoEspecies[nome].volume += tora.volume;
             resumoEspecies[nome].qtd += 1;
         });
 
-        // 1. Processa a baixa no Banco de Dados via IPC
+        // 1. Processa a baixa no Banco
         await window.api.invoke('processar-baixa-lote', { ids, dataSaida });
 
-        // 2. Montagem do HTML com layout consolidado [cite: 2026-01-16]
+        // 2. Montagem do HTML para o PDF
         const htmlParaPDF = `
             <html>
             <head>
                 <style>
                     body { font-family: 'Segoe UI', Arial, sans-serif; padding: 30px; color: #333; }
-                    .header { text-align: center; border-bottom: 1.5px solid #2c3e50; margin-bottom: 20px; padding-bottom: 10px; }
-                    .header h1 { margin: 0; font-size: 18px; color: #2c3e50; text-transform: uppercase; }
+                    .header { text-align: center; border-bottom: 2px solid #2c3e50; margin-bottom: 20px; padding-bottom: 10px; }
+                    .header h1 { margin: 0; font-size: 20px; text-transform: uppercase; }
                     
-                    .info-topo { margin-bottom: 15px; font-size: 11px; display: flex; justify-content: space-between; }
+                    .info-topo { margin-bottom: 15px; font-size: 12px; display: flex; justify-content: space-between; }
                     
-                    table { width: 100%; border-collapse: collapse; margin-top: 5px; }
-                    
-                    /* Cabeçalho padrão azul acinzentado */
+                    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
                     thead th { 
                         background-color: #8faab7 !important; 
                         color: #ffffff !important; 
@@ -657,164 +866,196 @@ async function processarBaixaEGerarPDF() {
                         border: 1px solid #d1d9e0;
                         -webkit-print-color-adjust: exact;
                     }
+                    td { font-size: 10px; padding: 8px; border: 1px solid #e2e8f0; text-align: center; }
                     
-                    /* Bordas finas conforme solicitado */
-                    td { 
-                        font-size: 10px; 
-                        padding: 8px; 
-                        border: 1px solid #e2e8f0; 
-                        text-align: center; 
-                    }
-
+                    .oco-info { color: #e11d48; font-size: 9px; display: block; margin-top: 2px; }
                     .bold { font-weight: bold; }
-                    .text-left { text-align: left; padding-left: 10px; }
-
-                    /* SEÇÃO DO RESUMO - FONTE TAMANHO 8 */
-                    .resumo-especies { 
-                        margin-top: 20px; 
-                        font-size: 8px; /* Tamanho solicitado */
-                        color: #444;
-                        line-height: 1.4;
-                        border-top: 1px solid #eee;
-                        padding-top: 10px;
-                    }
-                    .resumo-titulo { font-weight: bold; margin-bottom: 5px; text-decoration: underline; }
-
-                    .total-geral { 
-                        margin-top: 15px; 
-                        text-align: right; 
-                        font-size: 12px; 
-                        font-weight: bold; 
-                        border-top: 2px solid #2c3e50;
-                        padding-top: 5px;
-                    }
-
+                    
+                    .resumo-secao { margin-top: 25px; font-size: 10px; border: 1px solid #eee; padding: 15px; background: #fcfcfc; }
+                    .total-final { text-align: right; font-size: 14px; font-weight: bold; margin-top: 15px; border-top: 2px solid #2c3e50; padding-top: 10px; }
+                    
                     .assinaturas { margin-top: 60px; display: flex; justify-content: space-around; }
-                    .sig-line { border-top: 0.5px solid #333; width: 180px; text-align: center; font-size: 9px; padding-top: 5px; }
+                    .sig-line { border-top: 1px solid #333; width: 220px; text-align: center; font-size: 10px; padding-top: 5px; }
                 </style>
             </head>
             <body>
-                <div class="header">
-                    <h1>Romaneio de Saída de Estoque</h1>
-                </div>
-
+                <div class="header"><h1>Romaneio de Saída de Toras</h1></div>
                 <div class="info-topo">
                     <span><strong>Data de Saída:</strong> ${dataSaida.split('-').reverse().join('/')}</span>
-                    <span><strong>Total de Toras:</strong> ${listaParaBaixa.length}</span>
+                    <span><strong>Quantidade:</strong> ${listaParaBaixa.length} toras</span>
                 </div>
 
                 <table>
                     <thead>
                         <tr>
-                            <th>Número</th> <th class="text-left">Espécie</th>
+                            <th>Número</th>
+                            <th>Espécie</th>
                             <th>Lote</th>
-                            <th>Medidas (cm x m)</th>
-                            <th>Vol (m³)</th>
+                            <th>Medidas (Rodo | Comp)</th>
+                            <th>Volume Líquido (m³)</th>
                         </tr>
                     </thead>
                     <tbody>
-                        ${listaParaBaixa.map(t => `
-                            <tr>
-                                <td class="bold">${t.codigo}</td>
-                                <td class="text-left">${t.especie_nome}</td>
-                                <td>${t.lote_numero}</td>
-                                <td>${t.m1} x ${t.m2} x ${t.comprimento}</td>
-                                <td class="bold">${t.volume.toFixed(3)}</td>
-                            </tr>
-                        `).join('')}
+                        ${listaParaBaixa.map(t => {
+            // Lógica do Oco para o PDF
+            let ocoHTML = "";
+            if (t.desconto_1 > 0 || t.desconto_2 > 0) {
+                const volDesc = t.total_desconto ? t.total_desconto.toFixed(3).replace('.', ',') : "0,000";
+                ocoHTML = `<span class="oco-info">Oco: ${t.desconto_1}x${t.desconto_2} = ${volDesc}</span>`;
+            }
+
+            return `
+                                <tr>
+                                    <td class="bold">${t.codigo}</td>
+                                    <td>${t.especie_nome}</td>
+                                    <td>${t.lote_numero || '---'}</td>
+                                    <td>
+                                        R: ${t.rodo} | C: ${t.comprimento.toFixed(2)}
+                                        ${ocoHTML}
+                                    </td>
+                                    <td class="bold">${t.volume.toFixed(3).replace('.', ',')}</td>
+                                </tr>
+                            `;
+        }).join('')}
                     </tbody>
                 </table>
 
-                <div class="resumo-especies">
-                    <div class="resumo-titulo">RESUMO POR ESPÉCIE:</div>
+                <div class="resumo-secao">
+                    <strong>RESUMO POR ESPÉCIE:</strong><br><br>
                     ${Object.entries(resumoEspecies).map(([nome, dados]) => `
-                        <div>${nome}: ${dados.volume.toFixed(3)} m³ (${dados.qtd} toras)</div>
+                        <div>${nome}: ${dados.volume.toFixed(3).replace('.', ',')} m³ (${dados.qtd} toras)</div>
                     `).join('')}
                 </div>
 
-                <div class="total-geral">
-                    VOLUME TOTAL GERAL: ${totalVolumeGeral.toFixed(3)} m³
+                <div class="total-final">
+                    VOLUME TOTAL DO ROMANEIO: ${totalVolumeGeral.toFixed(3).replace('.', ',')} m³
                 </div>
 
                 <div class="assinaturas">
-                    <div class="sig-line">Responsável Pátio</div>
-                    <div class="sig-line">Responsável Serraria</div>
+                    <div class="sig-line">Responsável pelo Pátio</div>
+                    <div class="sig-line">Conferência Serraria</div>
                 </div>
             </body>
             </html>
         `;
 
-        // 3. Envia para o processo Main gerar o arquivo PDF
         await window.api.invoke('gerar-pdf-logs', htmlParaPDF);
-
-        Swal.fire('Sucesso', 'Baixa realizada e romaneio gerado!', 'success');
-
-        // Limpa a tela após o sucesso
+        Swal.fire('Sucesso', 'Baixa realizada e romaneio gerado com sucesso!', 'success');
         limparListaTemporaria();
-        if (typeof carregarEstoque === 'function') carregarEstoque();
 
     } catch (err) {
         console.error(err);
-        Swal.fire('Erro', 'Falha ao processar: ' + err.message, 'error');
+        Swal.fire('Erro', 'Falha ao processar romaneio: ' + err.message, 'error');
     }
 }
 
 // --- FUNÇÕES DO ESTOQUE GERAL ---
-async function carregarEstoque(limparFiltros = false) {
+let offsetEstoque = 0;
+let estaCarregando = false;
+
+async function carregarEstoque(resetarPaginacao = false) {
+    if (estaCarregando) return;
+
     const corpo = document.getElementById('lista-estoque-corpo');
+    const btnMais = document.getElementById('btn-carregar-mais');
     if (!corpo) return;
 
     try {
-        corpo.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px;"><div class="spinner"></div></td></tr>';
-
-        if (limparFiltros) {
-            document.getElementById('filtro-estoque-status').value = 'pátio';
-            document.getElementById('filtro-estoque-codigo').value = '';
-            await atualizarFiltroLotes();
-            document.getElementById('filtro-estoque-lote').value = 'todos';
-        }
+        estaCarregando = true;
 
         const status = document.getElementById('filtro-estoque-status').value;
         const loteId = document.getElementById('filtro-estoque-lote').value;
-        const codigo = document.getElementById('filtro-estoque-codigo').value;
+        const codigoInput = document.getElementById('filtro-estoque-codigo');
+        const codigo = codigoInput ? codigoInput.value.trim() : '';
 
-        const toras = await window.api.invoke('get-estoque-detalhado', { status, codigo, loteId });
+        if (resetarPaginacao) {
+            offsetEstoque = 0;
+            corpo.style.opacity = '0.5';
+        }
 
-        corpo.innerHTML = '';
-        if (toras.length === 0) {
-            corpo.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 20px;">Nenhuma tora encontrada.</td></tr>';
-            document.getElementById('indicador-qtd-patio').innerText = '0';
-            document.getElementById('indicador-vol-patio').innerText = '0.000';
+        if (btnMais) {
+            btnMais.disabled = true;
+            btnMais.innerHTML = '<i data-lucide="loader-2" class="animate-spin"></i> Processando...';
+            if (window.lucide) lucide.createIcons();
+        }
+
+        const [totais, toras] = await Promise.all([
+            window.api.invoke('get-totais-estoque', { status, codigo, loteId }),
+            window.api.invoke('get-estoque-detalhado', { status, codigo, loteId, limite: 50, pular: offsetEstoque })
+        ]);
+
+        const elQtd = document.getElementById('indicador-qtd-patio');
+        const elVol = document.getElementById('indicador-vol-patio');
+        if (elQtd) elQtd.innerText = (totais.total_qtd || 0).toLocaleString('pt-BR');
+        if (elVol) elVol.innerText = (totais.total_vol || 0).toFixed(3).replace('.', ',');
+
+        if (toras.length === 0 && offsetEstoque === 0) {
+            corpo.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 20px;">Nenhuma tora encontrada.</td></tr>';
+            if (btnMais) btnMais.style.display = 'none';
             return;
         }
 
-        let totalVol = 0;
-        corpo.innerHTML = toras.map(t => {
-            totalVol += t.volume;
+        const htmlLinhas = toras.map(t => {
+            let medidasDisplay = `R: ${t.rodo} | C: ${t.comprimento.toFixed(2)}`;
+            if (t.desconto_1 > 0 || t.desconto_2 > 0) {
+                medidasDisplay += `<br><small style="color: #e11d48; font-weight: 600;">Oco: ${t.desconto_1}x${t.desconto_2}</small>`;
+            }
 
-            // Define a classe e o texto amigável baseando-se no status
             const statusClass = t.status === 'pátio' ? 'status-patio' : 'status-serrada';
             const statusTexto = t.status === 'pátio' ? 'NO PÁTIO' : 'SERRADA';
 
+            // Recuperando seus botões e ícones originais [cite: 2026-01-16]
             return `
                 <tr>
-                <td><b>${t.codigo}</b></td>
-                <td>${t.especie_nome}</td>
-                <td><span class="badge-lote">${t.lote_numero}</span></td>
-                <td>${t.volume.toFixed(3)} m³</td>
-                <td><span class="status-tag ${statusClass}">${statusTexto}</span></td>
-                <td>${new Date(t.data_entrada).toLocaleDateString('pt-BR')}</td>
-                <td style="text-align: right;">
-                    <button class="btn-icon-edit" onclick="prepararEdicaoTora('${encodeURIComponent(JSON.stringify(t))}')"><i data-lucide="pencil"></i></button>
-                    <button class="btn-icon-delete" onclick="confirmarExclusaoTora(${t.id}, '${t.codigo}', '${t.status}')"><i data-lucide="trash-2"></i></button>
-                </td>
+                    <td><span class="badge-numero">${t.codigo}</span></td>
+                    <td>${t.especie_nome || '---'}</td>
+                    <td><span class="badge-lote-">${t.lote_numero || '---'}</span></td>
+                    <td>${medidasDisplay}</td>
+                    <td style="font-weight: bold;">${(t.volume || 0).toFixed(3).replace('.', ',')}</td>
+                    <td><span class="status-tag ${statusClass}">${statusTexto}</span></td>
+                    <td>${new Date(t.data_entrada).toLocaleDateString('pt-BR')}</td>
+                    <td style="text-align: right;">
+                        <button class="btn-icon-edit" title="Editar" 
+                                onclick="prepararEdicaoTora('${encodeURIComponent(JSON.stringify(t))}')">
+                            <i data-lucide="pencil"></i>
+                        </button>
+                        <button class="btn-icon-delete" title="Excluir" 
+                                onclick="confirmarExclusaoTora(${t.id}, '${t.codigo}', '${t.status}')">
+                            <i data-lucide="trash-2"></i>
+                        </button>
+                    </td>
                 </tr>`;
         }).join('');
 
-        document.getElementById('indicador-qtd-patio').innerText = toras.length;
-        document.getElementById('indicador-vol-patio').innerText = totalVol.toFixed(3);
-        lucide.createIcons();
-    } catch (err) { console.error(err); }
+        if (offsetEstoque === 0) {
+            corpo.innerHTML = htmlLinhas;
+            corpo.style.opacity = '1'; // Volta ao normal
+        } else {
+            corpo.insertAdjacentHTML('beforeend', htmlLinhas);
+        }
+
+        offsetEstoque += toras.length;
+
+        if (btnMais) {
+            btnMais.disabled = false;
+            btnMais.innerHTML = '<i data-lucide="refresh-cw"></i> Carregar mais toras...';
+            btnMais.style.display = (toras.length < 50 || codigo !== '') ? 'none' : 'block';
+        }
+
+        if (window.lucide) lucide.createIcons();
+
+    } catch (err) {
+        console.error("Erro ao carregar estoque:", err);
+        if (corpo) corpo.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #e11d48;">Erro ao processar dados.</td></tr>';
+    } finally {
+        estaCarregando = false;
+    }
+}
+
+// Função auxiliar para não repetir código
+function atualizarIndicadores(qtd, vol) {
+    document.getElementById('indicador-qtd-patio').innerText = qtd;
+    document.getElementById('indicador-vol-patio').innerText = vol.toFixed(3).replace('.', ',');
 }
 
 async function atualizarFiltroLotes() {
@@ -851,8 +1092,10 @@ async function confirmarExclusaoTora(id, codigo) {
                 Swal.fire('Não permitido', resultado.error, 'error');
             } else {
                 avisar('success', 'Tora removida do sistema.');
-                if (document.getElementById('v-estoque').classList.contains('active')) carregarEstoque();
-                carregarTorasRecentes();
+                if (document.getElementById('v-estoque').classList.contains('active')) {
+                    carregarEstoque(true);
+                }
+                listarTorasRecentes();
             }
         }
     } catch (err) {
@@ -932,239 +1175,216 @@ async function carregarFiltrosRelatorio() {
     }
 }
 
-async function gerarPreviaRelatorio() {
-    // 1. Captura os valores dos filtros
+//OUVINTE PARA QUANDO SELECIONAR TIPO DE RELATÓRIO INVENTÁRIO
+// Adicione isso dentro da sua função de inicialização ou no escopo global do renderer.js
+document.getElementById('rel-tipo').addEventListener('change', function () {
+    const dataInicio = document.getElementById('rel-data-inicio');
+    const dataFim = document.getElementById('rel-data-fim');
+
+    if (this.value === 'estoque') {
+        dataInicio.value = "";
+        dataFim.value = "";
+        dataInicio.disabled = true;
+        dataFim.disabled = true;
+        dataInicio.style.backgroundColor = "#f1f5f9"; // Cor de fundo cinza
+        dataFim.style.backgroundColor = "#f1f5f9";
+    } else {
+        dataInicio.disabled = false;
+        dataFim.disabled = false;
+        dataInicio.style.backgroundColor = "";
+        dataFim.style.backgroundColor = "";
+    }
+});
+
+let offsetRelatorio = 0;
+let carregandoRelatorio = false;
+
+async function gerarPreviaRelatorio(resetarPaginacao = true) {
+    if (carregandoRelatorio) return;
+
+    const tipoRel = document.getElementById('rel-tipo').value;
+    const tbody = document.getElementById('rel-tabela-corpo');
+    const btnMais = document.getElementById('btn-rel-carregar-mais');
+    const containerResumos = document.getElementById('container-resumos');
+
+    // 1. Captura os filtros
     const filtros = {
-        tipo: document.getElementById('rel-tipo').value,
+        tipo: tipoRel,
         dataInicio: document.getElementById('rel-data-inicio').value,
         dataFim: document.getElementById('rel-data-fim').value,
         especieId: document.getElementById('rel-especie').value,
-        loteId: document.getElementById('rel-lote').value
+        loteId: document.getElementById('rel-lote').value,
+        limite: 50,
+        pular: resetarPaginacao ? 0 : offsetRelatorio
     };
 
-    // Validação simples: Se escolher datas, ambas devem estar preenchidas
-    if ((filtros.dataInicio && !filtros.dataFim) || (!filtros.dataInicio && filtros.dataFim)) {
-        Swal.fire('Atenção', 'Para filtrar por data, preencha o início e o fim.', 'warning');
-        return;
+    // 2. Validação de Datas para relatórios que não são Inventário Total
+    if (tipoRel !== 'estoque') {
+        if ((filtros.dataInicio && !filtros.dataFim) || (!filtros.dataInicio && filtros.dataFim)) {
+            Swal.fire('Atenção', 'Para relatórios históricos, preencha ambas as datas.', 'warning');
+            return;
+        }
     }
 
     try {
-        // 2. Chama o Main.js para buscar os dados filtrados
-        const dados = await window.api.invoke('buscar-dados-relatorio', filtros);
+        carregandoRelatorio = true;
 
-        // 3. Renderiza os resultados na tabela e nos indicadores
-        renderizarTabelaRelatorio(dados);
-        atualizarIndicadoresRelatorio(dados);
+        // Feedback visual no botão (Padrão Estoque Geral)
+        if (btnMais) {
+            btnMais.disabled = true;
+            btnMais.innerHTML = '<i data-lucide="loader-2" class="animate-spin"></i> Processando...';
+            if (window.lucide) lucide.createIcons();
+        }
+
+        if (resetarPaginacao) {
+            offsetRelatorio = 0;
+            tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 40px;">Buscando dados...</td></tr>';
+            if (containerResumos) containerResumos.innerHTML = '';
+            
+            // BUSCA RESUMOS (Calcula totais de todas as toras para os cards de espécie/lote)
+            const resumoGeral = await window.api.invoke('get-resumo-gerencial', filtros);
+            renderizarResumosDescritivos(resumoGeral);
+            
+            tbody.innerHTML = ''; // Limpa para carregar a tabela
+        }
+
+        // BUSCA TORAS PAGINADAS (Apenas 50 por vez)
+        const toras = await window.api.invoke('buscar-dados-relatorio-paginado', filtros);
+
+        if (toras.length === 0 && offsetRelatorio === 0) {
+            tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; padding: 40px; color: #94a3b8;">Nenhum registro encontrado para este filtro.</td></tr>`;
+            if (btnMais) btnMais.style.display = 'none';
+            return;
+        }
+
+        // 3. Renderiza as linhas na tabela (usando append para "Carregar mais")
+        renderizarLinhasTabelaRelatorio(toras, !resetarPaginacao);
+
+        // 4. Atualiza o offset e o estado do botão
+        offsetRelatorio += toras.length;
+        
+        if (btnMais) {
+            btnMais.disabled = false;
+            // Se vieram menos que 50, significa que acabou o banco
+            btnMais.style.display = toras.length < 50 ? 'none' : 'block';
+            btnMais.innerHTML = '<i data-lucide="refresh-cw"></i> Carregar mais registros...';
+            if (window.lucide) lucide.createIcons();
+        }
 
     } catch (err) {
         console.error("Erro ao gerar relatório:", err);
-        Swal.fire('Erro', 'Não foi possível buscar os dados do relatório.', 'error');
-    }
-
-    const tbody = document.getElementById('rel-tabela-corpo');
-    const containerResumos = document.getElementById('container-resumos');
-
-    // 1. Reset e Verificação de Dados
-    if (!dados || dados.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 40px; color: #94a3b8;">Nenhum registro encontrado para estes filtros.</td></tr>`;
-        if (containerResumos) containerResumos.innerHTML = '';
-        document.getElementById('rel-total-vol').innerText = '0,000 m³';
-        document.getElementById('rel-total-qtd').innerText = '0';
-        return;
-    }
-
-    let volTotalGeral = 0;
-    const resumoEspecies = {};
-    const resumoLotes = {};
-
-    // 2. Processamento dos Dados e Construção da Tabela
-    tbody.innerHTML = dados.map(t => {
-        const vol = Number(t.volume);
-        volTotalGeral += vol;
-
-        // Acumular totais para os objetos de resumo
-        resumoEspecies[t.especie_nome] = (resumoEspecies[t.especie_nome] || 0) + vol;
-        resumoLotes[t.lote_numero] = (resumoLotes[t.lote_numero] || 0) + vol;
-
-        // Formatação do Comprimento (ex: 6,00 ou 5,50) e Volume
-        const compFormatado = Number(t.comprimento).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        const volFormatado = vol.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
-
-        // Identificador visual de Status (Útil para o relatório Geral)
-        const statusTag = t.status === 'serrada'
-            ? '<span style="color: #ef4444; font-weight: bold;">[S]</span>'
-            : '<span style="color: #22c55e; font-weight: bold;">[P]</span>';
-
-        return `
-            <tr>
-                <td><b>${t.codigo}</b></td>
-                <td>${t.especie_nome}</td>
-                <td><span class="badge-lote">${t.lote_numero}</span></td>
-                <td style="text-align: center;">${t.m1} x ${t.m2} x ${compFormatado}</td>
-                <td style="text-align: center;"><b>${volFormatado}</b></td>
-                <td style="text-align: right; padding-right: 20px;">
-                    <small style="margin-right: 5px;">${statusTag}</small>
-                    ${new Date(t.data_entrada).toLocaleDateString('pt-BR')}
-                </td>
-            </tr>
-        `;
-    }).join('');
-
-    // 3. Atualizar Indicadores Globais (Topo da tela)
-    document.getElementById('rel-total-vol').innerText = `${volTotalGeral.toLocaleString('pt-BR', { minimumFractionDigits: 3 })} m³`;
-    document.getElementById('rel-total-qtd').innerText = dados.length;
-
-    // 4. Renderizar Resumos Consolidados (Cards de Rodapé)
-    if (containerResumos) {
-        containerResumos.innerHTML = `
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 25px; border-top: 2px solid #f1f5f9; padding-top: 20px;">
-                <div style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px;">
-                    <h4 style="color: #95afc0; margin-bottom: 12px; border-bottom: 2px solid #95afc0; padding-bottom: 5px;">
-                        Resumo por Espécie
-                    </h4>
-                    <div style="max-height: 200px; overflow-y: auto;">
-                        ${Object.entries(resumoEspecies).sort((a, b) => b[1] - a[1]).map(([nome, vol]) => `
-                            <div style="display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px dashed #e2e8f0;">
-                                <span>${nome}</span>
-                                <b>${vol.toLocaleString('pt-BR', { minimumFractionDigits: 3 })} m³</b>
-                            </div>
-                        `).join('')}
-                    </div>
-                </div>
-
-                <div style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px;">
-                    <h4 style="color: #95afc0; margin-bottom: 12px; border-bottom: 2px solid #95afc0; padding-bottom: 5px;">
-                        Resumo por Lote
-                    </h4>
-                    <div style="max-height: 200px; overflow-y: auto;">
-                        ${Object.entries(resumoLotes).sort((a, b) => b[1] - a[1]).map(([nro, vol]) => `
-                            <div style="display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px dashed #e2e8f0;">
-                                <span>Lote ${nro}</span>
-                                <b>${vol.toLocaleString('pt-BR', { minimumFractionDigits: 3 })} m³</b>
-                            </div>
-                        `).join('')}
-                    </div>
-                </div>
-            </div>
-        `;
+        Swal.fire('Erro', 'Ocorreu um problema ao processar o relatório.', 'error');
+    } finally {
+        carregandoRelatorio = false;
     }
 }
-function renderizarTabelaRelatorio(dados) {
+
+// Função auxiliar para montar o HTML das linhas
+function renderizarLinhasTabelaRelatorio(dados, append = false) {
     const tbody = document.getElementById('rel-tabela-corpo');
-    const containerResumos = document.getElementById('container-resumos');
-
-    // Limpeza obrigatória para não acumular resumos de buscas anteriores
-    if (containerResumos) containerResumos.innerHTML = '';
-
-    if (!dados || dados.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 40px; color: #94a3b8;">Nenhum registro encontrado.</td></tr>`;
-        document.getElementById('rel-total-vol').innerText = '0,000 m³';
-        document.getElementById('rel-total-qtd').innerText = '0';
-        return;
-    }
-
-    let volTotalGeral = 0;
-    const resumoEspecies = {};
-    const resumoLotes = {};
-
-    // --- PROCESSAMENTO DOS DADOS ---
-    let htmlLinhas = "";
-    dados.forEach(t => {
+    
+    const html = dados.map(t => {
         const vol = Number(t.volume);
-        volTotalGeral += vol;
-
-        // Inicialização dos objetos de resumo
-        if (!resumoEspecies[t.especie_nome]) resumoEspecies[t.especie_nome] = { pQtd: 0, pVol: 0, sQtd: 0, sVol: 0 };
-        if (!resumoLotes[t.lote_numero]) resumoLotes[t.lote_numero] = { pQtd: 0, pVol: 0, sQtd: 0, sVol: 0 };
-
-        if (t.status === 'serrada') {
-            resumoEspecies[t.especie_nome].sQtd++;
-            resumoEspecies[t.especie_nome].sVol += vol;
-            resumoLotes[t.lote_numero].sQtd++;
-            resumoLotes[t.lote_numero].sVol += vol;
-        } else {
-            resumoEspecies[t.especie_nome].pQtd++;
-            resumoEspecies[t.especie_nome].pVol += vol;
-            resumoLotes[t.lote_numero].pQtd++;
-            resumoLotes[t.lote_numero].pVol += vol;
-        }
-
-        const compFormatado = Number(t.comprimento).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        const volFormatado = vol.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
-
-        // Tags e Datas
         const statusTag = t.status === 'serrada' ? '<b style="color:#ef4444">[S]</b>' : '<b style="color:#22c55e">[P]</b>';
         const dataEntrada = new Date(t.data_entrada).toLocaleDateString('pt-BR');
         const dataSaida = t.data_saida ? new Date(t.data_saida).toLocaleDateString('pt-BR') : '---';
-
-        htmlLinhas += `
+        
+        return `
             <tr>
-                <td><b>${t.codigo}</b></td>
+                <td><span class="badge-numero">${t.codigo}</span></td> 
                 <td>${t.especie_nome}</td>
-                <td><span class="badge-lote">${t.lote_numero}</span></td>
-                <td style="text-align: center;">${t.m1} x ${t.m2} x ${compFormatado}</td>
-                <td style="text-align: center;"><b>${volFormatado}</b></td>
+                <td><span class="badge-lote">${t.lote_numero || '---'}</span></td>
+                <td style="text-align: center;">R: ${t.rodo} | C: ${Number(t.comprimento).toFixed(2)}</td>
+                <td style="text-align: center;"><b>${vol.toLocaleString('pt-BR', { minimumFractionDigits: 3 })}</b></td>
                 <td style="text-align: center;">${dataEntrada}</td>
-                <td style="text-align: center; color: #ef4444;">
-                    ${t.status === 'serrada' ? `<b>${dataSaida}</b>` : '<span style="color: #cbd5e1">---</span>'}
-                </td>
-                <td style="text-align: right; padding-right: 10px;">
-                    <small>${statusTag}</small>
-                </td>
+                <td style="text-align: center; color: #ef4444;">${dataSaida}</td>
+                <td style="text-align: right;"><small>${statusTag}</small></td>
             </tr>`;
-    });
+    }).join('');
 
-    // Injeta as linhas na tabela
-    tbody.innerHTML = htmlLinhas;
+    if (append) {
+        tbody.insertAdjacentHTML('beforeend', html);
+    } else {
+        tbody.innerHTML = html;
+    }
+}
+// Apenas para desenhar as linhas (tr)
+function renderizarLinhasTabelaRelatorio(dados, append = false) {
+    const tbody = document.getElementById('rel-tabela-corpo');
+    
+    const html = dados.map(t => {
+        const vol = Number(t.volume);
+        const statusTag = t.status === 'serrada' ? '<b style="color:#ef4444">[S]</b>' : '<b style="color:#22c55e">[P]</b>';
+        
+        return `
+            <tr>
+                <td><span class="badge-numero">${t.codigo}</span></td> 
+                <td>${t.especie_nome}</td>
+                <td><span class="badge-lote">${t.lote_numero || '---'}</span></td>
+                <td style="text-align: center;">R: ${t.rodo} | C: ${Number(t.comprimento).toFixed(2)}</td>
+                <td style="text-align: center;"><b>${vol.toLocaleString('pt-BR', { minimumFractionDigits: 3 })}</b></td>
+                <td style="text-align: center;">${new Date(t.data_entrada).toLocaleDateString('pt-BR')}</td>
+                <td style="text-align: center; color: #ef4444;">${t.data_saida ? new Date(t.data_saida).toLocaleDateString('pt-BR') : '---'}</td>
+                <td style="text-align: right;"><small>${statusTag}</small></td>
+            </tr>`;
+    }).join('');
 
-    // Atualiza indicadores de topo
-    document.getElementById('rel-total-vol').innerText = `${volTotalGeral.toLocaleString('pt-BR', { minimumFractionDigits: 3 })} m³`;
-    document.getElementById('rel-total-qtd').innerText = dados.length;
+    if (append) {
+        tbody.insertAdjacentHTML('beforeend', html);
+    } else {
+        tbody.innerHTML = html;
+    }
+}
 
-    // --- RENDERIZAÇÃO DOS RESUMOS DESCRITIVOS ---
-    if (containerResumos) {
-        const criarFraseHtml = (qtd, vol, tipo) => {
-            if (qtd === 0) return "";
-            const termoTora = qtd === 1 ? "tora" : "toras";
-            const termoAcao = tipo === 'patio' ? "no pátio" : "serrada";
-            const dotColor = tipo === 'patio' ? "#22c55e" : "#ef4444";
+// Para preencher os cards de resumo de todas as 1.400 toras
+function renderizarResumosDescritivos(resumo) {
+    const containerResumos = document.getElementById('container-resumos');
+    if (!containerResumos) return;
 
-            return `
+    // Atualiza os indicadores de topo (Volume e Quantidade Totais)
+    document.getElementById('rel-total-vol').innerText = `${resumo.volTotalGeral.toLocaleString('pt-BR', { minimumFractionDigits: 3 })} m³`;
+    document.getElementById('rel-total-qtd').innerText = resumo.qtdTotalGeral;
+
+    const criarFraseHtml = (qtd, vol, tipo) => {
+        if (qtd === 0) return "";
+        const termoTora = qtd === 1 ? "tora" : "toras";
+        const termoAcao = tipo === 'patio' ? "no pátio" : "serrada";
+        const dotColor = tipo === 'patio' ? "#22c55e" : "#ef4444";
+        return `
             <div class="resumo-frase" style="display: flex; align-items: center; gap: 8px; margin-top: 4px;">
                 <span style="height: 8px; width: 8px; background: ${dotColor}; border-radius: 50%; display: inline-block;"></span>
                 <span style="font-size: 0.9rem; color: #475569;">
                     ${qtd} ${termoTora} ${termoAcao} totalizando: <b>${vol.toLocaleString('pt-BR', { minimumFractionDigits: 3 })} m³</b>
                 </span>
             </div>`;
-        };
+    };
 
-        let htmlResumo = `
-        <div class="resumo-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 30px;">
-            <div class="resumo-card" style="background: white; border: 1px solid #e2e8f0; padding: 20px; border-radius: 12px; border-left: 6px solid #95afc0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
-                <h4 class="resumo-titulo" style="color: #95afc0; font-weight: bold; margin-bottom: 15px; border-bottom: 2px solid #f1f5f9; padding-bottom: 8px;">Totais por Espécie</h4>
-                ${Object.entries(resumoEspecies).map(([nome, d]) => `
-                    <div class="resumo-item" style="margin-bottom: 16px;">
-                        <strong style="color: #1e293b; display: block; margin-bottom: 4px;">${nome}</strong>
-                        ${criarFraseHtml(d.pQtd, d.pVol, 'patio')}
-                        ${criarFraseHtml(d.sQtd, d.sVol, 'serrada')}
-                    </div>
-                `).join('')}
-            </div>
+    let htmlResumo = `
+    <div class="resumo-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 30px;">
+        <div class="resumo-card" style="background: white; border: 1px solid #e2e8f0; padding: 20px; border-radius: 12px; border-left: 6px solid #95afc0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
+            <h4 class="resumo-titulo" style="color: #95afc0; font-weight: bold; margin-bottom: 15px; border-bottom: 2px solid #f1f5f9; padding-bottom: 8px;">Totais por Espécie</h4>
+            ${Object.entries(resumo.resumoEspecies).map(([nome, d]) => `
+                <div class="resumo-item" style="margin-bottom: 16px;">
+                    <strong style="color: #1e293b; display: block; margin-bottom: 4px;">${nome}</strong>
+                    ${criarFraseHtml(d.pQtd, d.pVol, 'patio')}
+                    ${criarFraseHtml(d.sQtd, d.sVol, 'serrada')}
+                </div>
+            `).join('')}
+        </div>
 
-            <div class="resumo-card" style="background: white; border: 1px solid #e2e8f0; padding: 20px; border-radius: 12px; border-left: 6px solid #95afc0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
-                <h4 class="resumo-titulo" style="color: #95afc0; font-weight: bold; margin-bottom: 15px; border-bottom: 2px solid #f1f5f9; padding-bottom: 8px;">Totais por Lote</h4>
-                ${Object.entries(resumoLotes).map(([lote, d]) => `
-                    <div class="resumo-item" style="margin-bottom: 16px;">
-                        <strong style="color: #1e293b; display: block; margin-bottom: 4px;">Lote ${lote}</strong>
-                        ${criarFraseHtml(d.pQtd, d.pVol, 'patio')}
-                        ${criarFraseHtml(d.sQtd, d.sVol, 'serrada')}
-                    </div>
-                `).join('')}
-            </div>
-        </div>`;
+        <div class="resumo-card" style="background: white; border: 1px solid #e2e8f0; padding: 20px; border-radius: 12px; border-left: 6px solid #95afc0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
+            <h4 class="resumo-titulo" style="color: #95afc0; font-weight: bold; margin-bottom: 15px; border-bottom: 2px solid #f1f5f9; padding-bottom: 8px;">Totais por Lote</h4>
+            ${Object.entries(resumo.resumoLotes).map(([lote, d]) => `
+                <div class="resumo-item" style="margin-bottom: 16px;">
+                    <strong style="color: #1e293b; display: block; margin-bottom: 4px;">Lote ${lote}</strong>
+                    ${criarFraseHtml(d.pQtd, d.pVol, 'patio')}
+                    ${criarFraseHtml(d.sQtd, d.sVol, 'serrada')}
+                </div>
+            `).join('')}
+        </div>
+    </div>`;
 
-        containerResumos.innerHTML = htmlResumo;
-    }
+    containerResumos.innerHTML = htmlResumo;
 }
 
 function atualizarIndicadoresRelatorio(dados) {
@@ -1179,274 +1399,234 @@ function atualizarIndicadoresRelatorio(dados) {
 }
 
 async function exportarRelatorioPDF() {
-    const linhasTabela = document.querySelectorAll('#rel-tabela-corpo tr');
-    if (linhasTabela.length === 0 || linhasTabela[0].innerText.includes("Nenhum registro")) {
-        Swal.fire('Aviso', 'Não há dados para exportar.', 'warning');
-        return;
-    }
-
     const { jsPDF } = window.jspdf;
-    // Orientação 'l' (Landscape) para caber a nova coluna de Saída confortavelmente
     const doc = new jsPDF('l', 'mm', 'a4');
 
-    const tipoTexto = document.getElementById('rel-tipo').options[document.getElementById('rel-tipo').selectedIndex].text;
-    const totalVolHeader = document.getElementById('rel-total-vol').innerText;
-    const totalQtdHeader = document.getElementById('rel-total-qtd').innerText;
+    const filtros = {
+        tipo: document.getElementById('rel-tipo').value,
+        dataInicio: document.getElementById('rel-data-inicio').value,
+        dataFim: document.getElementById('rel-data-fim').value,
+        especieId: document.getElementById('rel-especie').value,
+        loteId: document.getElementById('rel-lote').value
+    };
 
-    // --- CABEÇALHO ---
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(18);
-    doc.setTextColor(31, 41, 55);
-    doc.text("ToraControl - Relatório Operacional", 14, 20);
-    doc.setDrawColor(149, 175, 192); // Cor #95afc0
-    doc.line(14, 23, 280, 23); // Linha estendida para o modo paisagem
+    try {
+        Swal.fire({ title: 'Gerando PDF...', didOpen: () => { Swal.showLoading(); } });
 
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "normal");
-    doc.text(`Relatório: ${tipoTexto} | Emissão: ${new Date().toLocaleString('pt-BR')}`, 14, 30);
-    doc.text(`Resumo Geral: ${totalQtdHeader} toras | Vol. Total: ${totalVolHeader}`, 14, 35);
+        const dados = await window.api.invoke('buscar-dados-relatorio', filtros);
 
-    // --- TABELA PRINCIPAL (Agora com 7 Colunas) ---
-    const colunas = ["Número", "Espécie", "Lote", "Medidas (cm x m)", "Vol (m³)", "Entrada", "Saída"];
-    const linhasParaPDF = [];
-
-    linhasTabela.forEach((tr) => {
-        const tds = tr.querySelectorAll('td');
-        if (tds.length >= 7) {
-            linhasParaPDF.push([
-                tds[0].innerText, // Número
-                tds[1].innerText, // Espécie
-                tds[2].innerText, // Lote
-                tds[3].innerText, // Medidas
-                tds[4].innerText, // Volume
-                tds[5].innerText, // Entrada
-                tds[6].innerText  // Saída (Nova)
-            ]);
+        if (!dados || dados.length === 0) {
+            Swal.fire('Aviso', 'Não há dados para exportar.', 'warning');
+            return;
         }
-    });
 
-    doc.autoTable({
-        startY: 42,
-        head: [colunas],
-        body: linhasParaPDF,
-        theme: 'grid',
-        headStyles: { fillColor: [149, 175, 192], halign: 'center' },
-        styles: { fontSize: 8, cellPadding: 2 },
-        columnStyles: {
-            0: { fontStyle: 'bold' },
-            4: { halign: 'center', fontStyle: 'bold' },
-            5: { halign: 'center' },
-            6: { halign: 'center', textColor: [239, 68, 68] } // Vermelho para a Saída
-        }
-    });
+        // --- CABEÇALHO ---
+        doc.setFont("helvetica", "bold"); doc.setFontSize(16);
+        doc.text("ToraControl - Relatório Gerencial Detalhado", 14, 15);
+        doc.setFontSize(9); doc.setFont("helvetica", "normal");
+        doc.text(`Emissão: ${new Date().toLocaleString('pt-BR')}`, 14, 22);
 
-    // --- LÓGICA DE CÁLCULO PARA RESUMOS ---
-    const resumoLotes = {};
-    const resumoEspecies = {};
+        // --- CÁLCULO DOS RESUMOS (IGUAL AO QUE TEMOS NO RENDERER) ---
+        const resumoEspecies = {};
+        const resumoLotes = {};
+        let volTotalGeral = 0;
 
-    linhasParaPDF.forEach((linha) => {
-        const especie = linha[1];
-        const lote = linha[2];
-        const vol = parseFloat(linha[4].replace(/[^\d,.-]/g, '').replace(',', '.'));
-        // Verifica se há uma data na coluna saída (não é '---') para definir como serrada
-        const isSerrada = !linha[6].includes('---');
+        const linhas = dados.map(t => {
+            const vol = Number(t.volume);
+            volTotalGeral += vol;
+            const esp = t.especie_nome;
+            const lote = t.lote_numero || 'S/L';
 
-        if (!resumoLotes[lote]) resumoLotes[lote] = { patioQtd: 0, patioVol: 0, serradaQtd: 0, serradaVol: 0 };
-        if (!resumoEspecies[especie]) resumoEspecies[especie] = { patioQtd: 0, patioVol: 0, serradaQtd: 0, serradaVol: 0 };
+            // Agrupamento para o Resumo do PDF
+            if (!resumoEspecies[esp]) resumoEspecies[esp] = { pQtd: 0, pVol: 0, sQtd: 0, sVol: 0 };
+            if (!resumoLotes[lote]) resumoLotes[lote] = { pQtd: 0, pVol: 0, sQtd: 0, sVol: 0 };
 
-        if (isSerrada) {
-            resumoLotes[lote].serradaQtd++;
-            resumoLotes[lote].serradaVol += vol;
-            resumoEspecies[especie].serradaQtd++;
-            resumoEspecies[especie].serradaVol += vol;
-        } else {
-            resumoLotes[lote].patioQtd++;
-            resumoLotes[lote].patioVol += vol;
-            resumoEspecies[especie].patioQtd++;
-            resumoEspecies[especie].patioVol += vol;
-        }
-    });
+            if (t.status === 'serrada') {
+                resumoEspecies[esp].sQtd++; resumoEspecies[esp].sVol += vol;
+                resumoLotes[lote].sQtd++; resumoLotes[lote].sVol += vol;
+            } else {
+                resumoEspecies[esp].pQtd++; resumoEspecies[esp].pVol += vol;
+                resumoLotes[lote].pQtd++; resumoLotes[lote].pVol += vol;
+            }
 
-    let currentY = doc.lastAutoTable.finalY + 15;
+            return [
+                t.codigo, esp, lote, t.rodo, Number(t.comprimento).toFixed(2),
+                t.desconto_1 || 0, t.desconto_2 || 0,
+                vol.toFixed(3), new Date(t.data_entrada).toLocaleDateString('pt-BR'),
+                t.data_saida ? new Date(t.data_saida).toLocaleDateString('pt-BR') : '---'
+            ];
+        });
 
-    // --- SEÇÃO: RESUMO POR ESPÉCIE ---
-    if (currentY > 180) { doc.addPage(); currentY = 20; }
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(12);
-    doc.text("RESUMO POR ESPÉCIE", 14, currentY);
-    currentY += 8;
-    doc.setFontSize(10);
+        // --- TABELA PRINCIPAL ---
+        doc.autoTable({
+            startY: 28,
+            head: [["Número", "Espécie", "Lote", "Rodo", "Comp", "D1", "D2", "Vol (m³)", "Entrada", "Saída"]],
+            body: linhas,
+            theme: 'grid',
+            headStyles: { fillColor: [71, 85, 105], fontSize: 7, halign: 'center' },
+            styles: { fontSize: 7, cellPadding: 1 },
+            columnStyles: { 0: { fontStyle: 'bold' }, 7: { fontStyle: 'bold', halign: 'right' } }
+        });
 
-    Object.entries(resumoEspecies).forEach(([nomeEsp, d]) => {
-        if (currentY > 185) { doc.addPage(); currentY = 20; }
-        doc.setFont("helvetica", "bold");
-        doc.text(`${nomeEsp}:`, 14, currentY);
+        // --- SEÇÃO DE RESUMOS NO FINAL ---
+        let currentY = doc.lastAutoTable.finalY + 15;
+
+        // Função para evitar que o resumo saia da página
+        const checkPage = (y) => { if (y > 185) { doc.addPage(); return 20; } return y; };
+
+        // 1. Resumo por Espécie
+        doc.setFont("helvetica", "bold"); doc.setFontSize(11);
+        doc.text("RESUMO POR ESPÉCIE", 14, currentY);
+        currentY += 7;
+        doc.setFontSize(8); doc.setFont("helvetica", "normal");
+
+        Object.entries(resumoEspecies).forEach(([nome, d]) => {
+            currentY = checkPage(currentY);
+            let txt = `${nome}: `;
+            if (d.pQtd > 0) txt += `${d.pQtd} toras no pátio (${d.pVol.toFixed(3)} m³) | `;
+            if (d.sQtd > 0) txt += `${d.sQtd} toras serradas (${d.sVol.toFixed(3)} m³)`;
+            doc.text(txt, 18, currentY);
+            currentY += 5;
+        });
+
+        // 2. Resumo por Lote
         currentY += 5;
-        doc.setFont("helvetica", "normal");
+        currentY = checkPage(currentY);
+        doc.setFont("helvetica", "bold"); doc.setFontSize(11);
+        doc.text("RESUMO POR LOTE", 14, currentY);
+        currentY += 7;
+        doc.setFontSize(8); doc.setFont("helvetica", "normal");
 
-        if (d.patioQtd > 0) {
-            doc.text(`- ${d.patioQtd} ${d.patioQtd > 1 ? 'toras' : 'tora'} no pátio totalizando: ${d.patioVol.toLocaleString('pt-BR', { minimumFractionDigits: 3 })} m³`, 20, currentY);
+        Object.entries(resumoLotes).forEach(([lote, d]) => {
+            currentY = checkPage(currentY);
+            let txt = `Lote ${lote}: `;
+            if (d.pQtd > 0) txt += `${d.pQtd} toras no pátio (${d.pVol.toFixed(3)} m³) | `;
+            if (d.sQtd > 0) txt += `${d.sQtd} toras serradas (${d.sVol.toFixed(3)} m³)`;
+            doc.text(txt, 18, currentY);
             currentY += 5;
-        }
-        if (d.serradaQtd > 0) {
-            doc.text(`- ${d.serradaQtd} ${d.serradaQtd > 1 ? 'toras' : 'tora'} serrada totalizando: ${d.serradaVol.toLocaleString('pt-BR', { minimumFractionDigits: 3 })} m³`, 20, currentY);
-            currentY += 5;
-        }
-        currentY += 2;
-    });
+        });
 
-    currentY += 5;
-
-    // --- SEÇÃO: RESUMO POR LOTE ---
-    if (currentY > 180) { doc.addPage(); currentY = 20; }
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(12);
-    doc.text("RESUMO POR LOTE", 14, currentY);
-    currentY += 8;
-    doc.setFontSize(10);
-
-    Object.entries(resumoLotes).forEach(([nomeLote, d]) => {
-        if (currentY > 185) { doc.addPage(); currentY = 20; }
-        doc.setFont("helvetica", "bold");
-        doc.text(`Lote ${nomeLote}:`, 14, currentY);
+        // Total Geral em destaque
         currentY += 5;
-        doc.setFont("helvetica", "normal");
+        doc.setFont("helvetica", "bold"); doc.setFontSize(12);
+        doc.text(`VOLUME TOTAL GERAL: ${volTotalGeral.toFixed(3)} m³`, 14, currentY);
 
-        if (d.patioQtd > 0) {
-            doc.text(`- ${d.patioQtd} ${d.patioQtd > 1 ? 'toras' : 'tora'} no pátio totalizando: ${d.patioVol.toLocaleString('pt-BR', { minimumFractionDigits: 3 })} m³`, 20, currentY);
-            currentY += 5;
-        }
-        if (d.serradaQtd > 0) {
-            doc.text(`- ${d.serradaQtd} ${d.serradaQtd > 1 ? 'toras' : 'tora'} serrada totalizando: ${d.serradaVol.toLocaleString('pt-BR', { minimumFractionDigits: 3 })} m³`, 20, currentY);
-            currentY += 5;
-        }
-        currentY += 2;
-    });
+        doc.save(`Relatorio_Toras_${new Date().getTime()}.pdf`);
+        Swal.close();
 
-    const dataRef = new Date().toISOString().split('T')[0];
-    doc.save(`Relatorio_ToraControl_${dataRef}.pdf`);
-    Swal.fire({ icon: 'success', title: 'PDF Gerado!', showConfirmButton: false, timer: 1500 });
+    } catch (err) {
+        console.error(err);
+        Swal.fire('Erro', 'Falha ao gerar PDF.', 'error');
+    }
 }
 
 async function exportarRelatorioExcel() {
     const workbook = new ExcelJS.Workbook();
-    const sheetDetalhada = workbook.addWorksheet('Listagem Detalhada');
+    const sheetDetalhes = workbook.addWorksheet('Listagem Detalhada');
 
-    // 1. Configurar Cabeçalhos (Incluindo a nova coluna de Saída)
-    sheetDetalhada.columns = [
+    // 1. Configuração de Colunas da Planilha Principal
+    sheetDetalhes.columns = [
         { header: 'Número', key: 'numero', width: 12 },
         { header: 'Espécie', key: 'especie', width: 25 },
-        { header: 'Lote', key: 'lote', width: 20 },
-        { header: 'Medidas (cm x m)', key: 'medidas', width: 20 },
-        { header: 'Volume (m³)', key: 'volume', width: 15 },
-        { header: 'Data Entrada', key: 'entrada', width: 15 },
-        { header: 'Data Saída', key: 'saida', width: 15 }
+        { header: 'Lote', key: 'lote', width: 15 },
+        { header: 'Rodo (cm)', key: 'rodo', width: 10 },
+        { header: 'Comp (m)', key: 'comp', width: 10 },
+        { header: 'Desc 1', key: 'd1', width: 8 },
+        { header: 'Desc 2', key: 'd2', width: 8 },
+        { header: 'Volume (m³)', key: 'vol', width: 15 },
+        { header: 'Entrada', key: 'entrada', width: 15 },
+        { header: 'Saída', key: 'saida', width: 15 }
     ];
 
-    // Estilizar o cabeçalho com a cor padrão #95afc0
-    sheetDetalhada.getRow(1).eachCell((cell) => {
-        cell.fill = {
-            type: 'pattern',
-            pattern: 'solid',
-            fgColor: { argb: 'FF95AFC0' }
-        };
-        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    // Estilização do Cabeçalho (Padrão Cinza Escuro)
+    sheetDetalhes.getRow(1).eachCell(c => {
+        c.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF475569' } };
     });
 
-    // 2. Coletar dados da tabela HTML e processar resumos
-    const linhasTabela = document.querySelectorAll('#rel-tabela-corpo tr');
-    const resumoLotes = {};
-    const resumoEspecies = {};
+    const filtros = {
+        tipo: document.getElementById('rel-tipo').value,
+        dataInicio: document.getElementById('rel-data-inicio').value,
+        dataFim: document.getElementById('rel-data-fim').value,
+        especieId: document.getElementById('rel-especie').value,
+        loteId: document.getElementById('rel-lote').value
+    };
 
-    linhasTabela.forEach(tr => {
-        const tds = tr.querySelectorAll('td');
-        // Agora verificamos se existem as 7 colunas (contando a nova de Saída)
-        if (tds.length >= 7) {
-            const numero = tds[0].innerText;
-            const especie = tds[1].innerText;
-            const lote = tds[2].innerText;
-            const medidas = tds[3].innerText;
-            const volStr = tds[4].innerText.replace(/[^\d,.-]/g, '').replace(',', '.');
-            const vol = parseFloat(volStr);
-            const entrada = tds[5].innerText;
-            const saida = tds[6].innerText;
+    try {
+        Swal.fire({ title: 'Gerando Excel...', didOpen: () => { Swal.showLoading(); } });
 
-            // Determina o status baseado na coluna de Saída
-            const isSerrada = !saida.includes('---');
+        // Busca TODOS os dados (ignorando paginação da tela)
+        const dados = await window.api.invoke('buscar-dados-relatorio', filtros);
+        
+        const resumoEspecies = {}; 
+        const resumoLotes = {};
+        let volTotalGeral = 0;
 
-            // Adiciona linha na planilha detalhada
-            const row = sheetDetalhada.addRow({
-                numero: numero,
-                especie: especie,
-                lote: lote,
-                medidas: medidas,
-                volume: vol,
-                entrada: entrada,
-                saida: saida
+        dados.forEach(t => {
+            const vol = Number(t.volume);
+            volTotalGeral += vol;
+            const esp = t.especie_nome;
+            const lote = t.lote_numero || 'S/L';
+
+            // Adiciona Linha na Planilha Detalhada
+            sheetDetalhes.addRow({
+                numero: t.codigo, especie: esp, lote: lote,
+                rodo: Number(t.rodo), comp: Number(t.comprimento),
+                d1: Number(t.desconto_1 || 0), d2: Number(t.desconto_2 || 0),
+                vol: vol,
+                entrada: new Date(t.data_entrada).toLocaleDateString('pt-BR'),
+                saida: t.data_saida ? new Date(t.data_saida).toLocaleDateString('pt-BR') : '---'
             });
 
-            // Formatação condicional para a data de saída (vermelho se serrada)
-            if (isSerrada) {
-                row.getCell('saida').font = { color: { argb: 'FFFF0000' }, bold: true };
-            }
-
-            // Acumuladores para a aba de resumo
+            // Lógica de Acúmulo para o Resumo
+            if (!resumoEspecies[esp]) resumoEspecies[esp] = { pQtd: 0, pVol: 0, sQtd: 0, sVol: 0 };
             if (!resumoLotes[lote]) resumoLotes[lote] = { pQtd: 0, pVol: 0, sQtd: 0, sVol: 0 };
-            if (!resumoEspecies[especie]) resumoEspecies[especie] = { pQtd: 0, pVol: 0, sQtd: 0, sVol: 0 };
 
-            if (isSerrada) {
+            if (t.status === 'serrada') {
+                resumoEspecies[esp].sQtd++; resumoEspecies[esp].sVol += vol;
                 resumoLotes[lote].sQtd++; resumoLotes[lote].sVol += vol;
-                resumoEspecies[especie].sQtd++; resumoEspecies[especie].sVol += vol;
             } else {
+                resumoEspecies[esp].pQtd++; resumoEspecies[esp].pVol += vol;
                 resumoLotes[lote].pQtd++; resumoLotes[lote].pVol += vol;
-                resumoEspecies[especie].pQtd++; resumoEspecies[especie].pVol += vol;
             }
-        }
-    });
+        });
 
-    // Formatar coluna de volume como número no Excel para permitir somas
-    sheetDetalhada.getColumn('volume').numFmt = '#,##0.000';
+        // --- ABA DE RESUMOS ---
+        const sheetResumo = workbook.addWorksheet('Resumos Gerenciais');
+        sheetResumo.getColumn(1).width = 80;
 
-    // 3. Criar Aba de Resumos (Narrativo)
-    const sheetResumo = workbook.addWorksheet('Resumos Gerenciais');
+        const addSecao = (titulo, obj, labelPrefix = "") => {
+            sheetResumo.addRow([titulo]).font = { bold: true, size: 14, color: { argb: 'FF1E293B' } };
+            sheetResumo.addRow([]);
+            Object.entries(obj).forEach(([key, d]) => {
+                sheetResumo.addRow([`${labelPrefix}${key}`]).font = { bold: true };
+                if (d.pQtd > 0) sheetResumo.addRow([`  • ${d.pQtd} toras no pátio: ${d.pVol.toFixed(3).replace('.', ',')} m³`]);
+                if (d.sQtd > 0) sheetResumo.addRow([`  • ${d.sQtd} toras serradas: ${d.sVol.toFixed(3).replace('.', ',')} m³`]);
+                sheetResumo.addRow([]);
+            });
+        };
 
-    // Estilo para títulos de seção
-    const estiloTitulo = { font: { bold: true, size: 12, color: { argb: 'FF1E293B' } } };
+        addSecao("RESUMO POR ESPÉCIE", resumoEspecies);
+        addSecao("RESUMO POR LOTE", resumoLotes, "Lote ");
+        
+        sheetResumo.addRow(["VOLUME TOTAL GERAL: " + volTotalGeral.toFixed(3).replace('.', ',') + " m³"]).font = { bold: true, size: 12 };
 
-    sheetResumo.addRow(['RESUMO POR ESPÉCIE']).font = { bold: true, size: 14 };
-    sheetResumo.addRow([]);
+        // Formatação de Números na aba principal
+        sheetDetalhes.getColumn('H').numFmt = '#,##0.000';
 
-    Object.entries(resumoEspecies).forEach(([nome, d]) => {
-        sheetResumo.addRow([nome]).style = estiloTitulo;
-        if (d.pQtd > 0) sheetResumo.addRow([`• ${d.pQtd} ${d.pQtd > 1 ? 'toras' : 'tora'} no pátio totalizando: ${d.pVol.toFixed(3).replace('.', ',')} m³`]);
-        if (d.sQtd > 0) sheetResumo.addRow([`• ${d.sQtd} ${d.sQtd > 1 ? 'toras' : 'tora'} serrada totalizando: ${d.sVol.toFixed(3).replace('.', ',')} m³`]);
-        sheetResumo.addRow([]);
-    });
+        const buffer = await workbook.xlsx.writeBuffer();
+        const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const a = document.createElement('a');
+        a.href = window.URL.createObjectURL(blob);
+        a.download = `Relatorio_Geral_${new Date().toISOString().split('T')[0]}.xlsx`;
+        a.click();
 
-    sheetResumo.addRow(['RESUMO POR LOTE']).font = { bold: true, size: 14 };
-    sheetResumo.addRow([]);
+        Swal.fire({ icon: 'success', title: 'Excel Gerado!', showConfirmButton: false, timer: 1500 });
 
-    Object.entries(resumoLotes).forEach(([lote, d]) => {
-        sheetResumo.addRow([`Lote ${lote}`]).style = estiloTitulo;
-        if (d.pQtd > 0) sheetResumo.addRow([`• ${d.pQtd} ${d.pQtd > 1 ? 'toras' : 'tora'} no pátio totalizando: ${d.pVol.toFixed(3).replace('.', ',')} m³`]);
-        if (d.sQtd > 0) sheetResumo.addRow([`• ${d.sQtd} ${d.sQtd > 1 ? 'toras' : 'tora'} serrada totalizando: ${d.sVol.toFixed(3).replace('.', ',')} m³`]);
-        sheetResumo.addRow([]);
-    });
-
-    // Ajustar larguras da aba de resumo
-    sheetResumo.getColumn(1).width = 60;
-
-    // 4. Gerar arquivo e disparar download
-    const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `Relatorio_Excel_ToraControl_${new Date().toISOString().split('T')[0]}.xlsx`;
-    a.click();
-
-    Swal.fire({ icon: 'success', title: 'Excel Gerado com Sucesso!', timer: 1500, showConfirmButton: false });
+    } catch (err) {
+        console.error(err);
+        Swal.fire('Erro', 'Falha ao gerar planilha Excel.', 'error');
+    }
 }
 
 function limparFiltrosRelatorio() {
@@ -1480,71 +1660,99 @@ function limparFiltrosRelatorio() {
 // --- GESTÃO DE LOGS (Carregamento Inteligente) ---
 
 async function carregarLogs() {
-    // 1. Localiza a View de Logs e a Tabela
     const vLogs = document.getElementById('v-logs');
     const tbody = document.getElementById('lista-logs');
     if (!tbody || !vLogs) return;
 
-    // 2. Busca os inputs especificamente dentro da div #v-logs (evita pegar de outras abas)
-    const inputInicio = vLogs.querySelector('input[type="date"]:first-of-type') || document.getElementById('input-filtro-data-inicio-logs');
-    const inputFim = vLogs.querySelector('input[type="date"]:last-of-type') || document.getElementById('input-filtro-data-fim-logs');
-    const selectAcao = vLogs.querySelector('select') || document.getElementById('log-filtro-acao');
+    // Localização dos filtros
+    const inputInicio = document.getElementById('input-filtro-data-inicio-logs');
+    const inputFim = document.getElementById('input-filtro-data-fim-logs');
+    const selectAcao = document.getElementById('log-filtro-acao');
 
     const valorInicio = inputInicio ? inputInicio.value : '';
     const valorFim = inputFim ? inputFim.value : '';
     const valorAcao = selectAcao ? selectAcao.value : 'todos';
 
-    // Log no console do navegador para você ver se ele pegou a data certa
-    // console.log("Valores que o Renderer está lendo:", { valorInicio, valorFim, valorAcao });
-
-    // 3. Limpa a tabela e mostra carregando
-    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:20px;">Filtrando...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:20px;">Filtrando logs...</td></tr>';
 
     try {
-        const logs = await window.api.invoke('listar-logs', {
+        const resposta = await window.api.invoke('listar-logs', {
             acao: valorAcao,
             dataInicio: valorInicio,
             dataFim: valorFim,
-            limiteInicial: (!valorInicio && !valorFim && valorAcao === 'todos') ? 20 : null
+            limiteInicial: (!valorInicio && !valorFim && valorAcao === 'todos') ? 50 : 500
         });
 
-        // 4. Limpa novamente para inserir os novos
+        if (!resposta.success) throw new Error(resposta.error);
+
+        const logs = resposta.data;
         tbody.innerHTML = '';
 
         if (!logs || logs.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:20px; color:#94a3b8;">Nenhum log encontrado para este filtro.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:20px; color:#94a3b8;">Nenhum registro encontrado.</td></tr>';
             return;
         }
 
-        // 5. Gera as linhas
         let html = '';
         logs.forEach(log => {
-            let cor = "#64748b"; // Padrão
-            if (log.acao === 'exclusao') cor = "#ef4444";
-            if (log.acao === 'insercao') cor = "#22c55e";
-            if (log.acao === 'edicao') cor = "#eab308";
+            // 1. Definição das Badges (Incluindo EXCLUSÃO)
+            let badgeClass = "badge-log";
+            const acaoUpper = log.acao.toUpperCase();
 
-            // Formata data YYYY-MM-DD HH:MM:SS para DD/MM/YYYY HH:MM:SS
-            const partes = log.data_hora.split(' ');
-            const dataBr = partes[0].split('-').reverse().join('/');
-            const horaBr = partes[1] || '';
+            if (acaoUpper.includes('ENTRADA')) {
+                badgeClass += " badge-entrada";
+            } else if (acaoUpper.includes('EDIÇÃO')) {
+                badgeClass += " badge-edicao";
+            } else if (acaoUpper.includes('BAIXA') || acaoUpper.includes('ROMANEIO')) {
+                badgeClass += " badge-baixa";
+            } else if (acaoUpper.includes('LOTE')) {
+                badgeClass += " badge-lote";
+            } else if (acaoUpper.includes('EXCLUSÃO') || acaoUpper.includes('EXCLUSAO')) {
+                badgeClass += " badge-exclusao";
+            } else {
+                badgeClass += " badge-padrao";
+            }
+
+            // 2. Formatação Segura de Data/Hora
+            let dataExibicao = "---";
+            if (log.data_hora) {
+                try {
+                    const partes = log.data_hora.split(' ');
+                    const dataBr = partes[0].split('-').reverse().join('/');
+                    const horaBr = partes[1] ? partes[1].substring(0, 5) : '';
+                    dataExibicao = `${dataBr} ${horaBr}`;
+                } catch (e) {
+                    dataExibicao = log.data_hora; // Fallback caso o split falhe
+                }
+            }
 
             html += `
-                <tr style="border-bottom: 1px solid #f1f5f9;">
-                    <td style="font-family: monospace; font-size: 0.85rem; padding: 10px;">${dataBr} ${horaBr}</td>
-                    <td style="padding: 10px;">${log.usuario}</td>
-                    <td style="padding: 10px;"><b style="color: ${cor}; font-size: 0.7rem;">${log.acao.toUpperCase()}</b></td>
-                    <td style="padding: 10px; font-size: 0.9rem;">${log.descricao}</td>
+                <tr>
+                    <td style="font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: #64748b; white-space: nowrap;">
+                        <i data-lucide="calendar" style="width:12px; height:12px; display:inline; margin-right:4px;"></i>${dataExibicao}
+                    </td>
+                    <td style="font-weight: 500; color: #334155;">${log.usuario || 'Sistema'}</td>
+                    <td><span class="${badgeClass}">${acaoUpper}</span></td>
+                    <td style="color: #475569; font-size: 0.85rem; line-height: 1.4;">${log.descricao}</td>
                 </tr>
             `;
         });
 
         tbody.innerHTML = html;
+        if (window.lucide) lucide.createIcons();
 
     } catch (err) {
-        console.error(err);
-        tbody.innerHTML = '<tr><td colspan="4" style="color:red; text-align:center;">Erro ao filtrar.</td></tr>';
+        console.error("Erro na view de logs:", err);
+        tbody.innerHTML = `<tr><td colspan="4" style="color:#ef4444; text-align:center; padding:20px;">Erro ao carregar: ${err.message}</td></tr>`;
     }
+}
+
+// Função auxiliar para o botão "Limpar Filtros" (refresh-cw)
+function limparFiltrosLogs() {
+    document.getElementById('input-filtro-data-inicio-logs').value = '';
+    document.getElementById('input-filtro-data-fim-logs').value = '';
+    document.getElementById('log-filtro-acao').value = 'todos';
+    carregarLogs();
 }
 
 function limparFiltrosLogs() {
@@ -1775,54 +1983,151 @@ async function atualizarDashboard() {
 }
 async function buscarNumeroGlobal() {
     const inputBusca = document.getElementById('busca-global-numero');
-    const numero = inputBusca.value.trim();
+    if (!inputBusca) return;
 
-    if (!numero) {
+    const numeroOriginal = inputBusca.value.trim();
+    if (!numeroOriginal) {
         inputBusca.style.borderColor = '#ef4444';
         setTimeout(() => inputBusca.style.borderColor = '#e2e8f0', 2000);
         return;
     }
 
     try {
-        const tora = await window.api.invoke('buscar-tora-por-numero', numero);
+        const resposta = await window.api.invoke('buscar-tora-por-numero', numeroOriginal);
 
-        if (!tora) {
+        if (!resposta.success || !resposta.data) {
             Swal.fire({
                 title: 'Não encontrado',
-                text: `O Número ${numero} não foi localizado.`,
-                icon: 'error',
+                text: `O Número ${numeroOriginal} não foi localizado.`,
+                icon: 'info',
                 confirmButtonColor: '#6366f1'
             });
             return;
         }
 
-        const isPatio = tora.status === 'pátio';
-        const badgeColor = isPatio ? '#10b981' : '#ef4444';
-        const statusTexto = isPatio ? '[P] NO PÁTIO' : '[S] SERRADA';
+        const t = resposta.data;
 
-        // LÓGICA DE DATA: Altera o rótulo conforme o status
-        const rotuloData = isPatio ? 'Data de Entrada' : 'Data de Saída';
+        // --- FORMATAÇÕES DE VALORES ---
+        const formatarComprimento = (val) => {
+            let n = typeof val === 'string' ? parseFloat(val.replace(',', '.')) : val;
+            return (n || 0).toFixed(2).replace('.', ',');
+        };
 
+        const formatarVolume = (val) => {
+            let n = typeof val === 'string' ? parseFloat(val.replace(',', '.')) : val;
+            return (n || 0).toFixed(3).replace('.', ',');
+        };
+
+        // --- LÓGICA DE DATA (LIMPEZA DE TIMESTAMP) ---
+        const isPatio = ['pátio', 'estoque', 'patio'].includes(t.status?.toLowerCase());
+        const rawData = isPatio ? t.data_entrada : t.data_saida;
+        let dataExibicao = '---';
+
+        if (rawData) {
+            // Remove o horário (HH:MM:SS) e inverte para DD/MM/AAAA
+            dataExibicao = rawData.substring(0, 10).split('-').reverse().join('/');
+        }
+
+        // --- LÓGICA DO OCO (FORMATO 50x50) ---
+        let htmlOco = "";
+        const oco1 = parseInt(t.desconto_1) || 0;
+        const oco2 = parseInt(t.desconto_2) || 0;
+
+        if (oco1 > 0 || oco2 > 0) {
+            const volDesc = formatarVolume(t.total_desconto);
+            htmlOco = `
+                <div style="margin-top: 8px; color: #b91c1c; border-top: 1px dashed #cbd5e1; padding-top: 8px;">
+                    <p style="margin-bottom: 5px;"><b>Oco:</b> ${oco1}x${oco2}</p>
+                    <p style="margin-bottom: 5px; font-size: 0.8rem; opacity: 0.8;"><b>Desc. Volume:</b> ${volDesc} m³</p>
+                </div>
+            `;
+        }
+
+        const statusLabel = isPatio
+            ? '<span style="color: #10b981; font-weight: bold;">🟢 NO PÁTIO</span>'
+            : '<span style="color: #ef4444; font-weight: bold;">🔴 SERRADA</span>';
+
+        // --- EXIBIÇÃO DO MODAL ---
         Swal.fire({
-            title: `Detalhes do Número: ${tora.codigo}`, // [cite: 2026-01-17]
+            title: `Detalhes do Número: ${t.codigo}`,
+            width: '600px',
             html: `
-                <div style="text-align: left; padding: 15px; border-radius: 8px; background: #f8fafc; line-height: 2;">
-                    <p><strong>Status:</strong> <span style="color: ${badgeColor}; font-weight: bold;">${statusTexto}</span></p>
-                    <p><strong>Espécie:</strong> ${tora.especie_nome || '---'}</p>
-                    <p><strong>Lote:</strong> ${tora.lote_nome || '---'}</p>
-                    <p><strong>Volume:</strong> ${Number(tora.volume).toLocaleString('pt-BR', { minimumFractionDigits: 3 })} m³</p>
-                    <p><strong>${rotuloData}:</strong> ${new Date(tora.data_entrada).toLocaleDateString('pt-BR')}</p>
+                <div style="text-align: left; display: grid; grid-template-columns: 1fr 1fr; gap: 20px; font-size: 0.9rem; border-top: 1px solid #eee; padding-top: 15px;">
+                    <div>
+                        <p style="margin-bottom: 8px;"><b>Número:</b> ${t.codigo}</p>
+                        <p style="margin-bottom: 8px;"><b>Espécie:</b> ${t.especie_nome || '---'}</p>
+                        <p style="margin-bottom: 8px;"><b>Lote:</b> ${t.numero_lote || 'N/A'}</p>
+                        <p style="margin-bottom: 8px;"><b>Status:</b> ${statusLabel}</p>
+                        <p style="margin-bottom: 8px;"><b>Data ${isPatio ? 'Entrada' : 'Saída'}:</b> ${dataExibicao}</p>
+                    </div>
+
+                    <div style="background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                        <p style="margin-bottom: 5px;"><b>Rodo:</b> ${t.rodo || 0}</p>
+                        <p style="margin-bottom: 5px;"><b>Comprimento:</b> ${formatarComprimento(t.comprimento)} m</p>
+                        
+                        ${htmlOco}
+
+                        <hr style="margin: 8px 0; border: 0; border-top: 1px solid #cbd5e1;">
+                        <p style="font-size: 1.2rem; color: #1e40af; font-weight: bold; margin: 0;">Vol. Final: ${formatarVolume(t.volume)} m³</p>
+                    </div>
                 </div>
             `,
+            showCancelButton: !isPatio, // Só mostra botão de estorno se a tora estiver serrada
             confirmButtonText: 'Fechar',
-            confirmButtonColor: '#6366f1'
+            confirmButtonColor: '#6366f1',
+            cancelButtonText: 'Reverter Baixa',
+            cancelButtonColor: '#f59e0b'
+        }).then((result) => {
+            if (result.dismiss === Swal.DismissReason.cancel) {
+                // Aqui você chamaria sua função de estorno
+                reverterBaixaTora(t.id, t.codigo);
+            }
         });
 
         inputBusca.value = "";
         inputBusca.blur();
 
     } catch (err) {
-        console.error("Erro na busca:", err);
+        console.error("Erro na busca global:", err);
+    }
+}
+
+async function reverterBaixaTora(id, codigo) {
+    // 1. Confirmação de segurança
+    const { value: confirmar } = await Swal.fire({
+        title: 'Confirmar Estorno?',
+        text: `Deseja realmente retornar o Número ${codigo} para o estoque (Pátio)?`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#10b981',
+        cancelButtonColor: '#ef4444',
+        confirmButtonText: 'Sim, Reverter',
+        cancelButtonText: 'Cancelar'
+    });
+
+    if (confirmar) {
+        try {
+            // 2. Chama o banco para alterar o status
+            const resultado = await window.api.invoke('reverter-status-tora', id, codigo);
+
+            if (resultado.success) {
+                Swal.fire({
+                    title: 'Sucesso!',
+                    text: `O Número ${codigo} está de volta ao pátio.`,
+                    icon: 'success',
+                    confirmButtonColor: '#6366f1'
+                });
+                atualizarDashboard();
+                // Opcional: Recarregar tabelas se estiver em uma tela de listagem
+                if (typeof carregarToras === 'function') carregarToras();
+
+            } else {
+                Swal.fire('Erro', 'Não foi possível reverter: ' + resultado.error, 'error');
+            }
+        } catch (err) {
+            console.error("Erro ao estornar:", err);
+            Swal.fire('Erro', 'Falha na comunicação com o banco.', 'error');
+        }
     }
 }
 
@@ -1868,7 +2173,7 @@ function verificarProtecao() {
     const idHardware = machineIdSync();
 
     // 2. Define onde a licença deve estar salva (Pasta AppData/gestao_toras)
-    const pastaLicenca = path.join(process.env.APPDATA || (process.platform == 'darwin' ? process.env.HOME + '/Library/Preferences' : process.env.HOME + "/.local/share"), 'gestao-toras');
+    const pastaLicenca = path.join(process.env.APPDATA || (process.platform == 'darwin' ? process.env.HOME + '/Library/Preferences' : process.env.HOME + "/.local/share"), 'estoque-toras');
     const arquivoLicenca = path.join(pastaLicenca, 'license.dat');
     const MEU_SEGREDO = "TORAS2026";
 
@@ -1975,6 +2280,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (err) {
         console.error("Erro ao carregar dados do dashboard:", err);
     }
+    atualizarFiltroLotes();
     atualizarDashboard();
     lucide.createIcons();
 });
@@ -1989,12 +2295,45 @@ document.addEventListener('keydown', (e) => {
 function aplicarMascaraNumero(input) {
     let valor = input.value.trim();
 
-    // Se estiver vazio, não faz nada
     if (valor === "") return;
 
     // Remove qualquer caractere que não seja número
     valor = valor.replace(/\D/g, "");
 
-    // Aplica o preenchimento de zeros (01 -> 001)
-    input.value = valor.padStart(3, '0');
+    // Converte para número para remover zeros à esquerda desnecessários antes de reformatar
+    let numeroLimpo = parseInt(valor, 10);
+
+    if (isNaN(numeroLimpo)) {
+        input.value = "";
+        return;
+    }
+
+    // LÓGICA INTELIGENTE:
+    // Se o número for menor que 1000, mantém o padrão visual de 3 dígitos (001, 010, 100).
+    // Se for 1000 ou mais, ele apenas exibe o número real, sem limite de dígitos.
+    if (numeroLimpo < 1000) {
+        input.value = numeroLimpo.toString().padStart(3, '0');
+    } else {
+        input.value = numeroLimpo.toString();
+    }
+}
+function toggleSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const mainWrapper = document.querySelector('.main-wrapper'); // Ajuste o nome da classe aqui
+    const icon = document.getElementById('icon-toggle');
+    
+    // Alterna as classes de largura
+    sidebar.classList.toggle('minimized');
+    if (mainWrapper) {
+        mainWrapper.classList.toggle('expanded');
+    }
+    
+    // Atualiza o ícone da seta e re-renderiza o Lucide
+    if (sidebar.classList.contains('minimized')) {
+        icon.setAttribute('data-lucide', 'chevron-right');
+    } else {
+        icon.setAttribute('data-lucide', 'chevron-left');
+    }
+    
+    lucide.createIcons();
 }

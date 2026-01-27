@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, dialog, shell } = require('electron');
 const { machineIdSync } = require('node-machine-id');
 const fs = require('fs');
 const path = require('path');
@@ -6,6 +6,7 @@ const Database = require('better-sqlite3');
 const { autoUpdater } = require("electron-updater");
 
 let mainWindow;
+let splash;
 
 // --- CONFIGURAÇÃO DO BANCO DE DADOS ---
 const dbPath = path.join(app.getPath('userData'), 'toracontroll.db');
@@ -65,6 +66,18 @@ try { db.exec("ALTER TABLE toras ADD COLUMN data_saida TEXT;"); } catch (e) { }
 // --- JANELA PRINCIPAL COM TRAVAS DE PRODUÇÃO ---
 const packageInfo = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
 function createWindow() {
+    // 1. Criar a janela de Splash (Loader)
+    // Cria o Splash (Loader)
+    splash = new BrowserWindow({
+        width: 450,
+        height: 350,
+        frame: false,
+        transparent: true,
+        alwaysOnTop: true,
+        webPreferences: { nodeIntegration: true }
+    });
+    splash.loadFile('splash.html');
+
     mainWindow = new BrowserWindow({
         width: 1280,
         height: 800,
@@ -78,16 +91,44 @@ function createWindow() {
             devTools: !app.isPackaged // Bloqueia F12 em produção
         }
     });
+    mainWindow.on('closed', () => {
+        if (splash && !splash.isDestroyed()) {
+            splash.destroy();
+        }
+        mainWindow = null;
+    });
+    
     mainWindow.once('ready-to-show', () => {
+        setTimeout(() => {
+            splash.close();
+            mainWindow.show();
+            mainWindow.maximize(); // Se quiser que já abra grande
+        }, 1500);
         setupAutoUpdater(mainWindow);
     });
     mainWindow.setMenu(null); // Layout limpo conforme solicitado [cite: 2026-01-16]
-    mainWindow.maximize();
     mainWindow.loadFile('index.html');
-    mainWindow.once('ready-to-show', () => mainWindow.show());
+
     // Opcional: Impedir que o site mude o título (alguns HTMLs sobrescrevem o título)
     mainWindow.on('page-title-updated', (evt) => {
-      evt.preventDefault();
+        evt.preventDefault();
+    });
+    // 2. Bloqueio de atalhos de teclado (F5, Ctrl+R, Ctrl+Shift+I)
+    // Impede que o cliente recarregue a página ou tente forçar o DevTools
+    mainWindow.webContents.on('before-input-event', (event, input) => {
+        const isControlOrCommand = input.control || input.meta;
+
+        // Bloqueia F5 e Ctrl+R (Reload)
+        if (input.key === 'F5' || (isControlOrCommand && input.key.toLowerCase() === 'r')) {
+            event.preventDefault();
+        }
+
+        // Bloqueia Ctrl+Shift+I e F12 (Inspeção) em produção
+        if (app.isPackaged) {
+            if ((isControlOrCommand && input.shift && input.key.toLowerCase() === 'i') || input.key === 'F12') {
+                event.preventDefault();
+            }
+        }
     });
 
     if (app.isPackaged) {
@@ -128,7 +169,9 @@ function setupAutoUpdater(window) {
     });
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+    createWindow();
+});
 
 // --- HELPERS DE SISTEMA ---
 function obterDataLocal() {

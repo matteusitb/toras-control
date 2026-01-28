@@ -219,6 +219,7 @@
                                     <label>Comprimento (m)</label>
                                     <input type="text" id="comprimento"
                                         oninput="mascaraComprimento(this); calcularCubagem()"
+                                        onblur="finalizarComprimento(this); calcularCubagem()"
                                         class="custom-input highlight-focus" placeholder="0,00">
                                 </div>
                             </div>

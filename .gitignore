@@ -6,3 +6,5 @@ database.sqlite
 .env
 *.log
 renderer.js
+renderer-dev - Copia.js
+renderer-dev.js

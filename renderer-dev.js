@@ -381,24 +381,58 @@ async function salvarLote() {
 }
 
 async function carregarLotes() {
-    const lotes = await window.api.invoke('listar-lotes');
-    const tbody = document.getElementById('lista-lotes');
-    if (tbody) {
-        tbody.innerHTML = lotes.map(l => `
-            <tr>
-                <td><strong>${l.numero}</strong></td>
-                <td>${l.descricao || '-'}</td>
-                <td style="text-align: center;"><span class="badge-count">${l.total_toras} toras</span></td>
-                <td style="text-align: center;"><span class="badge-volume">${(l.volume_total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 3 })} m³</span></td>
-                <td style="text-align: right;">
-                    <button class="btn-icon-edit" onclick="prepararEdicaoLote('${encodeURIComponent(JSON.stringify(l))}')"><i data-lucide="pencil"></i></button>
-                    <button class="btn-icon-delete" onclick="excluirLote(${l.id})"><i data-lucide="trash-2"></i></button>
-                </td>
-            </tr>`).join('');
+    try {
+        // Busca a lista atualizada do banco de dados via IPC
+        const lotes = await window.api.invoke('listar-lotes');
+        
+        // 1. ATUALIZA A TABELA (View de Gerenciamento de Lotes)
+        const tbody = document.getElementById('lista-lotes');
+        if (tbody) {
+            if (lotes.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">Nenhum lote cadastrado.</td></tr>';
+            } else {
+                tbody.innerHTML = lotes.map(l => `
+                    <tr>
+                        <td><strong>${l.numero}</strong></td>
+                        <td>${l.descricao || '-'}</td>
+                        <td style="text-align: center;"><span class="badge-count">${l.total_toras} toras</span></td>
+                        <td style="text-align: center;"><span class="badge-volume">${(l.volume_total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 3 })} m³</span></td>
+                        <td style="text-align: right;">
+                            <button class="btn-icon-edit" title="Editar Lote" onclick="prepararEdicaoLote('${encodeURIComponent(JSON.stringify(l))}')">
+                                <i data-lucide="pencil"></i>
+                            </button>
+                            <button class="btn-icon-delete" title="Excluir Lote" onclick="excluirLote(${l.id})">
+                                <i data-lucide="trash-2"></i>
+                            </button>
+                        </td>
+                    </tr>`).join('');
+            }
+        }
+
+        // 2. ATUALIZA O SELECT DE CADASTRO (View de Entradas)
+        const selectCadastro = document.getElementById('tora-lote');
+        if (selectCadastro) {
+            const optionsCadastro = lotes.map(l => `<option value="${l.id}">${l.numero}</option>`).join('');
+            selectCadastro.innerHTML = '<option value="">Selecione...</option>' + optionsCadastro;
+        }
+
+        // 3. ATUALIZA O FILTRO DE BUSCA (View v-estoque) [cite: 2026-01-16]
+        const selectFiltro = document.getElementById('filtro-estoque-lote');
+        if (selectFiltro) {
+            const optionsFiltro = lotes.map(l => `<option value="${l.id}">${l.numero}</option>`).join('');
+            // Mantém "todos" como valor padrão conforme seu HTML
+            selectFiltro.innerHTML = '<option value="todos">Todos os Lotes</option>' + optionsFiltro;
+        }
+
+        // Renderiza os ícones do Lucide em todos os novos elementos
+        if (typeof lucide !== 'undefined') {
+            lucide.createIcons();
+        }
+
+    } catch (err) {
+        console.error("Erro ao carregar lotes:", err);
+        avisar('error', 'Falha ao sincronizar lista de lotes.');
     }
-    const select = document.getElementById('tora-lote');
-    if (select) select.innerHTML = '<option value="">Selecione...</option>' + lotes.map(l => `<option value="${l.id}">${l.numero}</option>`).join('');
-    lucide.createIcons();
 }
 
 function prepararEdicaoLote(json) {
@@ -2056,7 +2090,7 @@ async function buscarNumeroGlobal() {
                     <div>
                         <p style="margin-bottom: 8px;"><b>Número:</b> ${t.codigo}</p>
                         <p style="margin-bottom: 8px;"><b>Espécie:</b> ${t.especie_nome || '---'}</p>
-                        <p style="margin-bottom: 8px;"><b>Lote:</b> ${t.numero_lote || 'N/A'}</p>
+                        <p style="margin-bottom: 8px;"><b>Lote:</b> ${t.numero || 'N/A'}</p>
                         <p style="margin-bottom: 8px;"><b>Status:</b> ${statusLabel}</p>
                         <p style="margin-bottom: 8px;"><b>Data ${isPatio ? 'Entrada' : 'Saída'}:</b> ${dataExibicao}</p>
                     </div>

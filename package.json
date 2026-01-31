@@ -1,10 +1,13 @@
 {
   "name": "estoque-toras",
   "version": "1.0.11",
+  "description": "Sistema profissional para gestão de estoque e romaneio de toras",
+  "author": "Matteus Sousa",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "build:protect": "javascript-obfuscator renderer-dev.js --output renderer.js --string-array-encoding base64 --split-strings true --debug-protection true",
+    "rebuild": "electron-rebuild -f -w better-sqlite3",
     "release": "npm run build:protect && electron-builder --publish always",
     "dist": "npm run build:protect && electron-builder"
   },
@@ -14,10 +17,16 @@
     "electron-updater": "^6.7.3",
     "node-machine-id": "^1.1.12"
   },
-  "rebuild": "electron-rebuild -f -w better-sqlite3",
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^26.4.0",
+    "electron-rebuild": "^3.2.9",
+    "javascript-obfuscator": "^4.1.1"
+  },
   "build": {
     "appId": "com.estoquetoras.app",
     "productName": "Controle Estoque de Toras",
+    "copyright": "Copyright © 2026 Matteus Sousa",
     "npmRebuild": true,
     "nodeGypRebuild": false,
     "asar": true,
@@ -27,7 +36,7 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "MatteusItb",
+        "owner": "Matteus Sousa",
         "repo": "toras-control"
       }
     ],
@@ -35,24 +44,35 @@
       "output": "dist_setup"
     },
     "win": {
-      "target": "nsis",
-      "icon": "icon.ico"
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "icon.ico",
+      "requestedExecutionLevel": "asInvoker"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "shortcutName": "Controle Estoque de Toras"
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Controle Estoque de Toras",
+      "uninstallDisplayName": "Desinstalar Controle de Toras",
+      "runAfterFinish": true,
+      "installerIcon": "icon.ico",
+      "uninstallerIcon": "icon.ico"
     },
     "files": [
       "**/*",
       "!renderer-dev.js",
-      "!dist_setup/**/*"
+      "!dist_setup/**/*",
+      "!node_modules/*/{test,tests,testing,example,examples,docs}",
+      "!.git/**/*",
+      "!.vscode/**/*"
     ]
-  },
-  "devDependencies": {
-    "electron": "^33.0.0",
-    "electron-builder": "^26.4.0",
-    "electron-rebuild": "^3.2.9",
-    "javascript-obfuscator": "^4.1.1"
   }
 }

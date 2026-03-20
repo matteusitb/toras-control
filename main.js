@@ -201,6 +201,7 @@ ipcMain.handle('editar-especie', async (e, d) => {
     registrarLog('Operador', 'Edição Espécie', `Espécie ID ${d.id} atualizada.`);
     return { success: true };
 });
+
 ipcMain.handle('excluir-especie', async (e, id) => {
     const check = db.prepare('SELECT COUNT(*) as count FROM toras WHERE especie_id = ?').get(id);
     if (check.count > 0) return { success: false, error: `Não é possível excluir: existem ${check.count} toras desta espécie.` };

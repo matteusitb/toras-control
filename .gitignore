@@ -7,4 +7,5 @@ database.sqlite
 *.log
 renderer.js
 renderer-dev - Copia.js
+renderer-dev copy.js
 renderer-dev.js

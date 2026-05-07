@@ -4,6 +4,57 @@ const fs = require('fs');
 const path = require('path');
 const Database = require('better-sqlite3');
 const { autoUpdater } = require("electron-updater");
+const { createClient } = require('@supabase/supabase-js');
+const ws = require('ws');
+
+// --- CONFIGURAÇÃO SUPABASE ---
+const supabaseUrl = 'https://hmuxkqtgyyglafqlqggv.supabase.co';
+const supabaseKey = 'sb_publishable_G--VZElf06QOrBbxIFKvhA_GE1eOJwI';
+const supabase = createClient(supabaseUrl, supabaseKey, {
+    realtime: {
+        transport: ws,
+    },
+});
+
+// --- SEGURANÇA E ATIVAÇÃO ---
+const MEU_SEGREDO = "TORAS2026";
+let sistemaAtivado = false;
+let machineId = '';
+
+function verificarLicencaLocal() {
+    try {
+        machineId = machineIdSync();
+        const appData = app.getPath('userData');
+        const pastaLicenca = path.join(appData, 'estoque-toras');
+        const arquivoLicenca = path.join(pastaLicenca, 'license.dat');
+
+        if (!fs.existsSync(arquivoLicenca)) {
+            sistemaAtivado = false;
+            return false;
+        }
+
+        const chaveSalva = fs.readFileSync(arquivoLicenca, 'utf8').trim();
+        const chaveValidaParaEstePC = Buffer.from(machineId + MEU_SEGREDO).toString('base64');
+
+        sistemaAtivado = (chaveSalva === chaveValidaParaEstePC);
+        return sistemaAtivado;
+    } catch (err) {
+        console.error("Erro na verificação de licença:", err);
+        sistemaAtivado = false;
+        return false;
+    }
+}
+
+// Wrapper para proteger IPC Handlers
+function protectedHandle(channel, callback) {
+    ipcMain.handle(channel, async (event, ...args) => {
+        if (!sistemaAtivado) {
+            console.warn(`Tentativa de acesso ao canal protegido '${channel}' sem ativação.`);
+            return { success: false, error: "Sistema não ativado. Por favor, insira a chave de licença." };
+        }
+        return callback(event, ...args);
+    });
+}
 
 let mainWindow;
 let splash;
@@ -12,6 +63,24 @@ let splash;
 const dbPath = path.join(app.getPath('userData'), 'toracontroll.db');
 const db = new Database(dbPath);
 db.pragma('foreign_keys = ON');
+
+// Arquivo de configuração de backup
+const configPath = path.join(app.getPath('userData'), 'backup-config.json');
+
+function carregarConfigBackup() {
+    if (fs.existsSync(configPath)) {
+        try {
+            return JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        } catch (e) {
+            return { ativo: false, horarios: [], pasta: '' };
+        }
+    }
+    return { ativo: false, horarios: [], pasta: '' };
+}
+
+function salvarConfigBackup(config) {
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+}
 
 // --- ESTRUTURA DO BANCO (Garantindo Schema completo) ---
 db.exec(`
@@ -81,14 +150,14 @@ function createWindow() {
     mainWindow = new BrowserWindow({
         width: 1280,
         height: 800,
-        minWidth: 1050,
+        minWidth: 800,
         title: `${packageInfo.productName || "Controle de Toras"} - v${packageInfo.version || "1.0.0"}`,
         show: false,
         webPreferences: {
-            nodeIntegration: true,
-            contextIsolation: false,
-            enableRemoteModule: true,
-            devTools: !app.isPackaged // Bloqueia F12 em produção
+            nodeIntegration: false,
+            contextIsolation: true,
+            preload: path.join(__dirname, 'preload.js'),
+            devTools: !app.isPackaged
         }
     });
     mainWindow.on('closed', () => {
@@ -169,8 +238,52 @@ function setupAutoUpdater(window) {
     });
 }
 
+// --- LÓGICA DE BACKUP AGENDADO ---
+let ultimoBackupExecutado = ''; // Evita duplicar no mesmo minuto
+
+function verificarBackupAgendado() {
+    setInterval(() => {
+        const config = carregarConfigBackup();
+        if (!config.ativo || !config.pasta || !config.horarios || config.horarios.length === 0) return;
+
+        const agora = new Date();
+        const horaMinuto = agora.getHours().toString().padStart(2, '0') + ':' + 
+                           agora.getMinutes().toString().padStart(2, '0');
+
+        // Se a hora atual está na lista e ainda não rodamos este minuto
+        if (config.horarios.includes(horaMinuto) && ultimoBackupExecutado !== horaMinuto) {
+            executarBackupAutomatico(config.pasta, horaMinuto);
+            ultimoBackupExecutado = horaMinuto;
+        }
+    }, 30000); // Verifica a cada 30 segundos para maior precisão
+}
+
+async function executarBackupAutomatico(pastaDestino, hora) {
+    try {
+        if (!fs.existsSync(pastaDestino)) {
+            console.error("Pasta de backup não encontrada:", pastaDestino);
+            return;
+        }
+
+        const data = new Date().toISOString().split('T')[0];
+        const nomeArquivo = `backup_toras_${data}_${hora.replace(':', '-')}.db`;
+        const caminhoFinal = path.join(pastaDestino, nomeArquivo);
+
+        // Backup a quente usando better-sqlite3 (não trava o banco)
+        await db.backup(caminhoFinal);
+        
+        registrarLog('Sistema', 'BACKUP AUTO', `Cópia de segurança gerada automaticamente em: ${nomeArquivo}`);
+        console.log(`Backup automático realizado: ${caminhoFinal}`);
+    } catch (err) {
+        console.error("Erro no backup automático:", err);
+        registrarLog('Sistema', 'ERRO BACKUP', `Falha no backup automático: ${err.message}`);
+    }
+}
+
 app.whenReady().then(() => {
+    verificarLicencaLocal();
     createWindow();
+    verificarBackupAgendado();
 });
 
 // --- HELPERS DE SISTEMA ---
@@ -188,42 +301,61 @@ function registrarLog(usuario, acao, descricao) {
     } catch (err) { console.error("Erro ao registrar log:", err); }
 }
 
-// --- HANDLERS: ESPÉCIES ---
-ipcMain.handle('get-especies', async () => db.prepare("SELECT * FROM especies ORDER BY nome").all());
-ipcMain.handle('listar-especies', async () => db.prepare('SELECT * FROM especies ORDER BY nome ASC').all());
-ipcMain.handle('salvar-especie', async (e, d) => {
-    const res = db.prepare('INSERT INTO especies (nome, cientifico) VALUES (?, ?)').run(d.nome, d.cientifico);
-    registrarLog('Operador', 'Cadastro Espécie', `Espécie criada: ${d.nome}`);
-    return { success: true, id: res.lastInsertRowid };
-});
-ipcMain.handle('editar-especie', async (e, d) => {
-    db.prepare('UPDATE especies SET nome = ?, cientifico = ? WHERE id = ?').run(d.nome, d.cientifico, d.id);
-    registrarLog('Operador', 'Edição Espécie', `Espécie ID ${d.id} atualizada.`);
-    return { success: true };
+// --- HANDLERS: ESPÉCIES (Somente Leitura e Sincronização) ---
+protectedHandle('listar-especies', async () => {
+    return db.prepare("SELECT * FROM especies ORDER BY nome").all();
 });
 
-ipcMain.handle('excluir-especie', async (e, id) => {
-    const check = db.prepare('SELECT COUNT(*) as count FROM toras WHERE especie_id = ?').get(id);
-    if (check.count > 0) return { success: false, error: `Não é possível excluir: existem ${check.count} toras desta espécie.` };
-    db.prepare('DELETE FROM especies WHERE id = ?').run(id);
-    return { success: true };
+// Alias para compatibilidade com versões anteriores/outros renderers
+protectedHandle('get-especies', async () => {
+    return db.prepare("SELECT * FROM especies ORDER BY nome").all();
+});
+
+// NOVO: Sincronização de Espécies (Bulk Upsert do Supabase)
+protectedHandle('sync-especies-local', async (event, especies) => {
+    try {
+        const insert = db.prepare(`
+            INSERT INTO especies (id, nome, cientifico) 
+            VALUES (@id, @nome, @cientifico)
+            ON CONFLICT(id) DO UPDATE SET 
+                nome = excluded.nome, 
+                cientifico = excluded.cientifico
+        `);
+
+        const transaction = db.transaction((list) => {
+            for (const esp of list) {
+                insert.run({
+                    id: esp.id,
+                    nome: esp.nome,
+                    cientifico: esp.cientifico || null
+                });
+            }
+        });
+
+        transaction(especies);
+        registrarLog('Sistema', 'SYNC', `Sincronizadas ${especies.length} espécies do Supabase.`);
+        return { success: true };
+    } catch (err) {
+        console.error("Erro na sincronização:", err);
+        return { success: false, error: err.message };
+    }
 });
 
 // --- HANDLERS: LOTES ---
-ipcMain.handle('get-lotes', async () => db.prepare("SELECT * FROM lotes ORDER BY numero").all());
-ipcMain.handle('listar-lotes', async () => {
+protectedHandle('get-lotes', async () => db.prepare("SELECT * FROM lotes ORDER BY numero").all());
+protectedHandle('listar-lotes', async () => {
     return db.prepare(`
         SELECT l.*, COUNT(t.id) as total_toras, IFNULL(SUM(t.volume), 0) as volume_total
         FROM lotes l LEFT JOIN toras t ON l.id = t.lote_id
         GROUP BY l.id ORDER BY l.numero DESC
     `).all();
 });
-ipcMain.handle('salvar-lote', async (e, d) => {
+protectedHandle('salvar-lote', async (e, d) => {
     const res = db.prepare('INSERT INTO lotes (numero, descricao) VALUES (?, ?)').run(d.numero, d.descricao);
     registrarLog('Operador', 'Cadastro', `Lote Nome: ${d.numero} criado.`);
     return { success: true, id: res.lastInsertRowid };
 });
-ipcMain.handle('editar-lote', async (e, data) => {
+protectedHandle('editar-lote', async (e, data) => {
     try {
         const res = db.prepare('UPDATE lotes SET numero = ?, descricao = ? WHERE id = ?').run(data.numero, data.descricao, data.id);
         // LOG ADICIONADO
@@ -235,7 +367,7 @@ ipcMain.handle('editar-lote', async (e, data) => {
     }
 });
 
-ipcMain.handle('excluir-lote', async (e, id) => {
+protectedHandle('excluir-lote', async (e, id) => {
     const check = db.prepare('SELECT COUNT(*) as count FROM toras WHERE lote_id = ?').get(id);
     if (check.count > 0) {
         throw new Error(`Não é possível excluir: o lote contém ${check.count} toras cadastradas.`);
@@ -248,7 +380,7 @@ ipcMain.handle('excluir-lote', async (e, id) => {
 });
 
 // --- HANDLERS: TORAS E ESTOQUE (MODULO NÚMERO) ---
-ipcMain.handle('salvar-tora', async (event, tora) => {
+protectedHandle('salvar-tora', async (event, tora) => {
     try {
         const stmt = db.prepare(`
             INSERT INTO toras (
@@ -290,7 +422,7 @@ ipcMain.handle('salvar-tora', async (event, tora) => {
     }
 });
 
-ipcMain.handle('excluir-tora', async (event, id) => {
+protectedHandle('excluir-tora', async (event, id) => {
     try {
         // Busca o código antes de deletar para usar no log
         const tora = db.prepare('SELECT codigo, status FROM toras WHERE id = ?').get(id);
@@ -298,7 +430,7 @@ ipcMain.handle('excluir-tora', async (event, id) => {
         if (!tora) throw new Error("Tora não encontrada.");
 
         if (tora.status === 'serrada') {
-            throw new Error(`A Tora Número ${tora.codigo} já foi baixada (serrada) e não pode ser excluída.`);
+            throw new Error(`A Tora Número ${tora.codigo} ya foi baixada (serrada) e não pode ser excluída.`);
         }
 
         db.prepare('DELETE FROM toras WHERE id = ?').run(id);
@@ -316,7 +448,7 @@ ipcMain.handle('excluir-tora', async (event, id) => {
     }
 });
 
-ipcMain.handle('editar-tora', async (event, tora) => {
+protectedHandle('editar-tora', async (event, tora) => {
     try {
         const stmt = db.prepare(`
             UPDATE toras SET 
@@ -359,7 +491,7 @@ ipcMain.handle('editar-tora', async (event, tora) => {
     }
 });
 
-ipcMain.handle('get-totais-estoque', async (event, filtros) => {
+protectedHandle('get-totais-estoque', async (event, filtros) => {
     try {
         let sql = `SELECT COUNT(*) as total_qtd, SUM(volume) as total_vol FROM toras WHERE 1=1`;
         const params = [];
@@ -405,7 +537,7 @@ ipcMain.handle('get-totais-estoque', async (event, filtros) => {
     }
 });
 
-ipcMain.handle('get-estoque-detalhado', async (event, filtros) => {
+protectedHandle('get-estoque-detalhado', async (event, filtros) => {
     try {
         // 1. Base da Query com Joins para trazer nomes de Espécie e Lote
         let sql = `
@@ -456,7 +588,7 @@ ipcMain.handle('get-estoque-detalhado', async (event, filtros) => {
     }
 });
 
-ipcMain.handle('buscar-tora-por-codigo', async (event, codigo) => {
+protectedHandle('buscar-tora-por-codigo', async (event, codigo) => {
     try {
         // Usamos CAST para garantir que a comparação ignore zeros à esquerda
         // Ex: '001' vira 1 e coincide com a coluna se ela for numérica.
@@ -480,7 +612,7 @@ ipcMain.handle('buscar-tora-por-codigo', async (event, codigo) => {
 });
 
 // Busca qualquer tora pelo número (independente do status, para consulta ou edição)
-ipcMain.handle('buscar-tora-por-numero', async (event, numero) => {
+protectedHandle('buscar-tora-por-numero', async (event, numero) => {
     try {
         const termo = String(numero).trim();
 
@@ -514,7 +646,7 @@ ipcMain.handle('buscar-tora-por-numero', async (event, numero) => {
     }
 });
 
-ipcMain.handle('estornar-baixa-tora', async (event, idTora, numeroTora) => {
+protectedHandle('estornar-baixa-tora', async (event, idTora, numeroTora) => {
     try {
         const stmt = db.prepare(`
             UPDATE estoque 
@@ -534,7 +666,7 @@ ipcMain.handle('estornar-baixa-tora', async (event, idTora, numeroTora) => {
     }
 });
 
-ipcMain.handle('listar-toras-recentes', async () => {
+protectedHandle('listar-toras-recentes', async () => {
     try {
         const query = `
             SELECT t.*, e.nome as especie_nome, l.numero as lote_numero 
@@ -551,7 +683,7 @@ ipcMain.handle('listar-toras-recentes', async () => {
         throw err;
     }
 });
-ipcMain.handle('reverter-status-tora', async (event, id, codigo) => {
+protectedHandle('reverter-status-tora', async (event, id, codigo) => {
     try {
         const transacao = db.transaction(() => {
             // 1. Atualiza o status do Número no estoque
@@ -580,7 +712,7 @@ ipcMain.handle('reverter-status-tora', async (event, id, codigo) => {
 });
 
 
-ipcMain.handle('processar-baixa-lote', async (event, { ids, dataSaida }) => {
+protectedHandle('processar-baixa-lote', async (event, { ids, dataSaida }) => {
     try {
         // Define a data no formato do banco (YYYY-MM-DD) para persistência
         const dataParaBanco = dataSaida || new Date().toISOString().split('T')[0];
@@ -614,7 +746,7 @@ ipcMain.handle('processar-baixa-lote', async (event, { ids, dataSaida }) => {
 });
 
 // --- HANDLERS: RELATÓRIOS E LOGS ---
-ipcMain.handle('buscar-dados-relatorio', async (event, filtros) => {
+protectedHandle('buscar-dados-relatorio', async (event, filtros) => {
     let sql = `
         SELECT t.*, e.nome as especie_nome, l.numero as lote_numero 
         FROM toras t 
@@ -670,7 +802,7 @@ ipcMain.handle('buscar-dados-relatorio', async (event, filtros) => {
     }
 });
 
-ipcMain.handle('get-resumo-gerencial', async (event, filtros) => {
+protectedHandle('get-resumo-gerencial', async (event, filtros) => {
     // Mesma lógica de filtros que você já usa
     let sql = `
         SELECT t.volume, t.status, e.nome as especie_nome, l.numero as lote_numero 
@@ -739,7 +871,7 @@ ipcMain.handle('get-resumo-gerencial', async (event, filtros) => {
     }
 });
 
-ipcMain.handle('buscar-dados-relatorio-paginado', async (event, filtros) => {
+protectedHandle('buscar-dados-relatorio-paginado', async (event, filtros) => {
     let sql = `
         SELECT t.*, e.nome as especie_nome, l.numero as lote_numero 
         FROM toras t 
@@ -783,7 +915,7 @@ ipcMain.handle('buscar-dados-relatorio-paginado', async (event, filtros) => {
     }
 });
 
-ipcMain.handle('listar-logs', async (event, filtros = {}) => {
+protectedHandle('listar-logs', async (event, filtros = {}) => {
     try {
         const { acao, dataInicio, dataFim, limiteInicial } = filtros;
         let sql = "SELECT * FROM logs WHERE 1=1";
@@ -827,7 +959,7 @@ ipcMain.handle('listar-logs', async (event, filtros = {}) => {
     }
 });
 // --- DASHBOARD (FUSÃO DE TODAS AS ESTATÍSTICAS) ---
-ipcMain.handle('get-dashboard-data', () => {
+protectedHandle('get-dashboard-data', () => {
     try {
         const estoque = db.prepare(`SELECT COUNT(*) as totalPecas, SUM(volume) as totalVolume FROM toras WHERE status = 'pátio'`).get();
         const dataHoje = new Date().toLocaleDateString('en-CA');
@@ -852,8 +984,62 @@ ipcMain.handle('get-dashboard-data', () => {
 
 // --- UTILITÁRIOS E SEGURANÇA ---
 ipcMain.handle('get-machine-id', () => machineIdSync());
+ipcMain.handle('check-activation-status', () => sistemaAtivado);
 
-ipcMain.handle('gerar-pdf-logs', async (event, html) => {
+ipcMain.handle('ativar-sistema', async (event, chave) => {
+    try {
+        const machineId = machineIdSync();
+        const chaveValida = Buffer.from(machineId + MEU_SEGREDO).toString('base64');
+
+        if (chave.trim() === chaveValida) {
+            const appData = app.getPath('userData');
+            const pastaLicenca = path.join(appData, 'estoque-toras');
+            const arquivoLicenca = path.join(pastaLicenca, 'license.dat');
+
+            if (!fs.existsSync(pastaLicenca)) {
+                fs.mkdirSync(pastaLicenca, { recursive: true });
+            }
+            fs.writeFileSync(arquivoLicenca, chave.trim());
+            sistemaAtivado = true;
+            return { success: true };
+        } else {
+            return { success: false, error: "Chave de ativação inválida." };
+        }
+    } catch (err) {
+        return { success: false, error: err.message };
+    }
+});
+
+// Handlers de Licenciamento
+ipcMain.handle('licenca-exists', async (event, pasta, arquivo) => {
+    const fullPath = path.join(pasta, arquivo);
+    return fs.existsSync(fullPath);
+});
+
+ipcMain.handle('licenca-mkdir', async (event, pasta) => {
+    if (!fs.existsSync(pasta)) {
+        fs.mkdirSync(pasta, { recursive: true });
+    }
+    return { success: true };
+});
+
+ipcMain.handle('licenca-write', async (event, arquivo, conteudo) => {
+    fs.writeFileSync(arquivo, conteudo);
+    return { success: true };
+});
+
+ipcMain.handle('licenca-read', async (event, arquivo) => {
+    if (fs.existsSync(arquivo)) {
+        return fs.readFileSync(arquivo, 'utf8');
+    }
+    return null;
+});
+
+ipcMain.handle('get-appdata-path', () => {
+    return process.env.APPDATA || (process.platform === 'darwin' ? process.env.HOME + '/Library/Preferences' : process.env.HOME + '/.local/share');
+});
+
+protectedHandle('gerar-pdf-logs', async (event, html) => {
     let winPDF = new BrowserWindow({ show: false });
     await winPDF.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
     const pdfData = await winPDF.webContents.printToPDF({ printBackground: true, pageSize: 'A4' });
@@ -864,7 +1050,7 @@ ipcMain.handle('gerar-pdf-logs', async (event, html) => {
     return { success: true };
 });
 
-ipcMain.handle('exportar-backup', async () => {
+protectedHandle('exportar-backup', async () => {
     // 1. Gera o nome com data/hora local para o Número [cite: 2026-01-17] e registros
     const dataFormatada = obterDataLocal().replace(/[: ]/g, '-');
     const nomeSugerido = `tora-control-backup-${dataFormatada}.db`;
@@ -901,7 +1087,7 @@ ipcMain.handle('exportar-backup', async () => {
     return { success: false };
 });
 
-ipcMain.handle('limpar-banco-dados', async () => {
+protectedHandle('limpar-banco-dados', async () => {
     db.transaction(() => {
         db.prepare('DELETE FROM toras').run();
         db.prepare('DELETE FROM lotes').run();
@@ -909,6 +1095,59 @@ ipcMain.handle('limpar-banco-dados', async () => {
         db.prepare("DELETE FROM logs").run();
     })();
     return { success: true };
+});
+
+// --- NOVOS HANDLERS: CONFIGURAÇÕES E BACKUP AGENDADO ---
+protectedHandle('get-backup-config', async () => carregarConfigBackup());
+
+protectedHandle('set-backup-config', async (e, config) => {
+    salvarConfigBackup(config);
+    return { success: true };
+});
+
+protectedHandle('selecionar-pasta-backup', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+        properties: ['openDirectory'],
+        title: 'Selecione a pasta para o Backup (Google Drive)'
+    });
+    if (result.canceled) return null;
+    return result.filePaths[0];
+});
+
+// --- HANDLERS SUPABASE ---
+protectedHandle('supabase-login', async (event, { email, password }) => {
+    try {
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        
+        // Registrar login no log local
+        registrarLog(email, 'LOGIN', 'Usuário autenticado via Supabase.');
+        
+        return { success: true, user: data.user };
+    } catch (err) {
+        return { success: false, error: err.message };
+    }
+});
+
+protectedHandle('supabase-fetch-especies', async () => {
+    try {
+        const { data, error } = await supabase.from('especies').select('*');
+        if (error) throw error;
+        return { success: true, data };
+    } catch (err) {
+        console.error("❌ Erro ao buscar espécies no Supabase:", err.message);
+        return { success: false, error: err.message };
+    }
+});
+
+protectedHandle('supabase-logout', async () => {
+    await supabase.auth.signOut();
+    return { success: true };
+});
+
+protectedHandle('supabase-get-session', async () => {
+    const { data } = await supabase.auth.getSession();
+    return data.session;
 });
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

@@ -31,8 +31,8 @@ function descriptografar(texto) {
 }
 
 // --- CONFIGURAÇÃO SUPABASE ---
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_KEY;
+const supabaseUrl = process.env.SUPABASE_URL || 'https://hmuxkqtgyyglafqlqggv.supabase.co';
+const supabaseKey = process.env.SUPABASE_KEY || 'sb_publishable_G--VZElf06QOrBbxIFKvhA_GE1eOJwI';
 const supabase = createClient(supabaseUrl, supabaseKey, {
     realtime: {
         transport: ws,

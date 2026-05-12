@@ -6,7 +6,7 @@
   "main": "entry.js",
   "scripts": {
     "start": "node -e \"require('fs').copyFileSync('renderer-dev.js', 'renderer.js')\" && electron .",
-    "build:protect": "javascript-obfuscator renderer-dev.js --output renderer.js --string-array-encoding base64 --split-strings true --debug-protection true && npx electron node_modules/bytenode/lib/cli.js --compile main.js",
+    "build:protect": "javascript-obfuscator renderer-dev.js --output renderer.js --string-array-encoding base64 --compact true && npx electron node_modules/bytenode/lib/cli.js --compile main.js",
     "rebuild": "electron-rebuild -f -w better-sqlite3",
     "release": "npm run build:protect && electron-builder --publish always",
     "dist": "npm run build:protect && electron-builder"

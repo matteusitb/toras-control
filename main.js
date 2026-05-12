@@ -1,4 +1,6 @@
 const { app, BrowserWindow, Menu, ipcMain, dialog, shell } = require('electron');
+require('dotenv').config();
+const crypto = require('crypto');
 const { machineIdSync } = require('node-machine-id');
 const fs = require('fs');
 const path = require('path');
@@ -7,9 +9,30 @@ const { autoUpdater } = require("electron-updater");
 const { createClient } = require('@supabase/supabase-js');
 const ws = require('ws');
 
+const _s = [84, 79, 82, 65, 83, 50, 48, 50, 54]; // TORAS2026
+const MEU_SEGREDO = process.env.APP_SECRET || String.fromCharCode(..._s);
+
+function criptografar(texto) {
+    const cipher = crypto.createCipher('aes-256-cbc', MEU_SEGREDO);
+    let crypted = cipher.update(texto, 'utf8', 'hex');
+    crypted += cipher.final('hex');
+    return crypted;
+}
+
+function descriptografar(texto) {
+    try {
+        const decipher = crypto.createDecipher('aes-256-cbc', MEU_SEGREDO);
+        let dec = decipher.update(texto, 'hex', 'utf8');
+        dec += decipher.final('utf8');
+        return dec;
+    } catch (e) {
+        return null;
+    }
+}
+
 // --- CONFIGURAÇÃO SUPABASE ---
-const supabaseUrl = 'https://hmuxkqtgyyglafqlqggv.supabase.co';
-const supabaseKey = 'sb_publishable_G--VZElf06QOrBbxIFKvhA_GE1eOJwI';
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey, {
     realtime: {
         transport: ws,
@@ -17,32 +40,99 @@ const supabase = createClient(supabaseUrl, supabaseKey, {
 });
 
 // --- SEGURANÇA E ATIVAÇÃO ---
-const MEU_SEGREDO = "TORAS2026";
 let sistemaAtivado = false;
 let machineId = '';
 
-function verificarLicencaLocal() {
-    try {
-        machineId = machineIdSync();
-        const appData = app.getPath('userData');
-        const pastaLicenca = path.join(appData, 'estoque-toras');
-        const arquivoLicenca = path.join(pastaLicenca, 'license.dat');
+let motivoBloqueio = 'unactivated'; // Pode ser 'unactivated', 'expired', 'fraud' ou 'ok'
 
-        if (!fs.existsSync(arquivoLicenca)) {
+async function verificarLicencaLocal() {
+    const appData = app.getPath('userData');
+    const pastaBase = path.join(appData, 'estoque-toras');
+    const arquivoLicenca = path.join(pastaBase, 'license.dat');
+
+    if (fs.existsSync(arquivoLicenca)) {
+        try {
+            const conteudoCriptografado = fs.readFileSync(arquivoLicenca, 'utf-8');
+            let conteudoJson = descriptografar(conteudoCriptografado);
+            
+            // MIGRACAO: Se falhou a descriptografia, tenta ler como Base64 (formato antigo)
+            if (!conteudoJson) {
+                try {
+                    const decBase64 = Buffer.from(conteudoCriptografado, 'base64').toString();
+                    if (decBase64.includes('"mid":')) {
+                        conteudoJson = decBase64;
+                        console.log("♻️ Formato de licença legado detectado. Migrando para novo padrão...");
+                    }
+                } catch (e) { }
+            }
+
+            if (!conteudoJson) {
+                sistemaAtivado = false;
+                motivoBloqueio = 'unactivated';
+                return false;
+            }
+            
+            const licenca = JSON.parse(conteudoJson);
+            machineId = machineIdSync();
+            
+            // 1. Verifica ID da Máquina
+            if (licenca.mid !== machineId) {
+                console.error("Máquina não autorizada.");
+                sistemaAtivado = false;
+                motivoBloqueio = 'unactivated';
+                return false;
+            }
+
+            const agora = new Date();
+            const exp = new Date(licenca.exp);
+            const lastSeen = licenca.last_seen ? new Date(licenca.last_seen) : null;
+
+            // 2. Verifica Expiração
+            if (agora > exp) {
+                console.error(`Licença expirada em: ${licenca.exp}`);
+                sistemaAtivado = false;
+                motivoBloqueio = 'expired';
+                return false;
+            }
+
+            // 3. ANTI-FRAUDE OFFLINE: Verifica se o relógio foi retrocedido comparando com o arquivo
+            if (lastSeen && agora < lastSeen) {
+                console.error("🚨 FRAUDE DETECTADA: Relógio retrocedido (visto no arquivo)!");
+                sistemaAtivado = false;
+                motivoBloqueio = 'fraud';
+                return false;
+            }
+
+            // 4. ANTI-FRAUDE DB: Verifica também contra o último log do banco
+            const ultimoLog = db.prepare("SELECT data_hora FROM logs ORDER BY data_hora DESC LIMIT 1").get();
+            if (ultimoLog) {
+                const dataUltimoLog = new Date(ultimoLog.data_hora);
+                if (agora < dataUltimoLog) {
+                    console.error("🚨 FRAUDE DETECTADA: Relógio retrocedido (visto no banco)!");
+                    sistemaAtivado = false;
+                    motivoBloqueio = 'fraud';
+                    return false;
+                }
+            }
+
+            // Se passou em tudo, ATUALIZA o 'last_seen' no arquivo para a próxima vez
+            licenca.last_seen = agora.toISOString();
+            fs.writeFileSync(arquivoLicenca, criptografar(JSON.stringify(licenca)));
+
+            sistemaAtivado = true;
+            motivoBloqueio = 'ok';
+            return true;
+
+        } catch (err) {
+            console.error("Erro ao ler licença:", err);
             sistemaAtivado = false;
+            motivoBloqueio = 'unactivated';
             return false;
         }
-
-        const chaveSalva = fs.readFileSync(arquivoLicenca, 'utf8').trim();
-        const chaveValidaParaEstePC = Buffer.from(machineId + MEU_SEGREDO).toString('base64');
-
-        sistemaAtivado = (chaveSalva === chaveValidaParaEstePC);
-        return sistemaAtivado;
-    } catch (err) {
-        console.error("Erro na verificação de licença:", err);
-        sistemaAtivado = false;
-        return false;
     }
+    sistemaAtivado = false;
+    motivoBloqueio = 'unactivated';
+    return false;
 }
 
 // Wrapper para proteger IPC Handlers
@@ -68,18 +158,31 @@ db.pragma('foreign_keys = ON');
 const configPath = path.join(app.getPath('userData'), 'backup-config.json');
 
 function carregarConfigBackup() {
-    if (fs.existsSync(configPath)) {
-        try {
-            return JSON.parse(fs.readFileSync(configPath, 'utf8'));
-        } catch (e) {
-            return { ativo: false, horarios: [], pasta: '' };
+    try {
+        if (fs.existsSync(configPath)) {
+            const data = fs.readFileSync(configPath, 'utf8');
+
+            return JSON.parse(data);
         }
+    } catch (e) {
+        console.error("❌ Erro ao carregar backup-config.json:", e.message);
     }
     return { ativo: false, horarios: [], pasta: '' };
 }
 
 function salvarConfigBackup(config) {
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+    try {
+        const pastaConfig = path.dirname(configPath);
+        if (!fs.existsSync(pastaConfig)) {
+            fs.mkdirSync(pastaConfig, { recursive: true });
+        }
+        fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+        console.log("✅ Configuração de backup salva com sucesso em:", configPath);
+        return true;
+    } catch (err) {
+        console.error("❌ Erro ao salvar backup-config.json:", err.message);
+        return false;
+    }
 }
 
 // --- ESTRUTURA DO BANCO (Garantindo Schema completo) ---
@@ -121,6 +224,12 @@ db.exec(`
         usuario TEXT,
         acao TEXT,
         descricao TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS usuarios (
+        email TEXT PRIMARY KEY,
+        password_hash TEXT NOT NULL,
+        last_login DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 `);
 
@@ -166,7 +275,7 @@ function createWindow() {
         }
         mainWindow = null;
     });
-    
+
     mainWindow.once('ready-to-show', () => {
         setTimeout(() => {
             splash.close();
@@ -247,8 +356,8 @@ function verificarBackupAgendado() {
         if (!config.ativo || !config.pasta || !config.horarios || config.horarios.length === 0) return;
 
         const agora = new Date();
-        const horaMinuto = agora.getHours().toString().padStart(2, '0') + ':' + 
-                           agora.getMinutes().toString().padStart(2, '0');
+        const horaMinuto = agora.getHours().toString().padStart(2, '0') + ':' +
+            agora.getMinutes().toString().padStart(2, '0');
 
         // Se a hora atual está na lista e ainda não rodamos este minuto
         if (config.horarios.includes(horaMinuto) && ultimoBackupExecutado !== horaMinuto) {
@@ -271,7 +380,7 @@ async function executarBackupAutomatico(pastaDestino, hora) {
 
         // Backup a quente usando better-sqlite3 (não trava o banco)
         await db.backup(caminhoFinal);
-        
+
         registrarLog('Sistema', 'BACKUP AUTO', `Cópia de segurança gerada automaticamente em: ${nomeArquivo}`);
         console.log(`Backup automático realizado: ${caminhoFinal}`);
     } catch (err) {
@@ -280,8 +389,14 @@ async function executarBackupAutomatico(pastaDestino, hora) {
     }
 }
 
-app.whenReady().then(() => {
-    verificarLicencaLocal();
+app.whenReady().then(async () => {
+    machineId = machineIdSync();
+    console.log("=========================================");
+    console.log("🚀 SISTEMA INICIADO");
+    console.log("💻 MACHINE ID DESTE PC:", machineId);
+    console.log("=========================================");
+
+    await verificarLicencaLocal();
     createWindow();
     verificarBackupAgendado();
 });
@@ -291,6 +406,11 @@ function obterDataLocal() {
     const agora = new Date();
     const offset = agora.getTimezoneOffset() * 60000;
     return (new Date(agora - offset)).toISOString().slice(0, 19).replace('T', ' ');
+}
+
+// Auxiliar para gerar hash de senha (segurança offline)
+function hashPassword(password) {
+    return crypto.createHash('sha256').update(password + MEU_SEGREDO).digest('hex');
 }
 
 
@@ -984,33 +1104,69 @@ protectedHandle('get-dashboard-data', () => {
 
 // --- UTILITÁRIOS E SEGURANÇA ---
 ipcMain.handle('get-machine-id', () => machineIdSync());
-ipcMain.handle('check-activation-status', () => sistemaAtivado);
-
-ipcMain.handle('ativar-sistema', async (event, chave) => {
-    try {
-        const machineId = machineIdSync();
-        const chaveValida = Buffer.from(machineId + MEU_SEGREDO).toString('base64');
-
-        if (chave.trim() === chaveValida) {
-            const appData = app.getPath('userData');
-            const pastaLicenca = path.join(appData, 'estoque-toras');
-            const arquivoLicenca = path.join(pastaLicenca, 'license.dat');
-
-            if (!fs.existsSync(pastaLicenca)) {
-                fs.mkdirSync(pastaLicenca, { recursive: true });
-            }
-            fs.writeFileSync(arquivoLicenca, chave.trim());
-            sistemaAtivado = true;
-            return { success: true };
-        } else {
-            return { success: false, error: "Chave de ativação inválida." };
-        }
-    } catch (err) {
-        return { success: false, error: err.message };
-    }
+ipcMain.handle('check-activation-status', () => {
+    return {
+        ativado: sistemaAtivado,
+        motivo: motivoBloqueio
+    };
 });
 
-// Handlers de Licenciamento
+
+ipcMain.handle('sincronizar-assinatura-forced', async () => {
+    console.log("🔄 [SYNC] Iniciando verificação forçada...");
+    try {
+        // Pega o último usuário logado diretamente do banco local (mais rápido e seguro que getSession)
+        const ultimoUsuario = db.prepare("SELECT email FROM usuarios ORDER BY last_login DESC LIMIT 1").get();
+        
+        if (!ultimoUsuario) {
+            console.error("❌ [SYNC] Nenhum usuário encontrado no banco local.");
+            return { success: false, error: "Nenhum usuário logado anteriormente neste PC." };
+        }
+
+        const email = ultimoUsuario.email;
+        console.log(`📡 [SYNC] Consultando Supabase para: ${email}...`);
+
+        // Timeout manual de 10 segundos para não travar o app
+        const { data: assinatura, error } = await supabase
+            .from('assinaturas')
+            .select('valid_until, status')
+            .eq('email', email)
+            .single();
+
+        if (error) {
+            console.error("❌ [SYNC] Erro Supabase:", error.message);
+            return { success: false, error: "Erro no servidor: " + error.message };
+        }
+
+        if (assinatura && (assinatura.status === 'ativo' || assinatura.status === 'pago')) {
+            const expiraEm = new Date(assinatura.valid_until);
+            const agora = new Date();
+
+            if (agora <= expiraEm) {
+                console.log("✅ [SYNC] Assinatura válida! Atualizando licença local...");
+                const appData = app.getPath('userData');
+                const arquivoLicenca = path.join(appData, 'estoque-toras', 'license.dat');
+                
+                const novaLicenca = { mid: machineIdSync(), exp: assinatura.valid_until, last_seen: agora.toISOString() };
+                fs.writeFileSync(arquivoLicenca, criptografar(JSON.stringify(novaLicenca)));
+                
+                sistemaAtivado = true;
+                motivoBloqueio = 'ok';
+                return { success: true };
+            } else {
+                console.warn("⚠️ [SYNC] Assinatura ainda consta como vencida no servidor.");
+                return { success: false, error: "Sua assinatura ainda consta como vencida." };
+            }
+        }
+        
+        console.warn("⚠️ [SYNC] Nenhuma assinatura ativa encontrada.");
+        return { success: false, error: "Assinatura não encontrada ou inativa." };
+
+    } catch (err) {
+        console.error("💥 [SYNC] Erro Crítico:", err);
+        return { success: false, error: "Falha de conexão. Verifique sua internet." };
+    }
+});
 ipcMain.handle('licenca-exists', async (event, pasta, arquivo) => {
     const fullPath = path.join(pasta, arquivo);
     return fs.existsSync(fullPath);
@@ -1101,8 +1257,8 @@ protectedHandle('limpar-banco-dados', async () => {
 protectedHandle('get-backup-config', async () => carregarConfigBackup());
 
 protectedHandle('set-backup-config', async (e, config) => {
-    salvarConfigBackup(config);
-    return { success: true };
+    const ok = salvarConfigBackup(config);
+    return { success: ok };
 });
 
 protectedHandle('selecionar-pasta-backup', async () => {
@@ -1114,18 +1270,129 @@ protectedHandle('selecionar-pasta-backup', async () => {
     return result.filePaths[0];
 });
 
+// --- NOVO HANDLER DE ATIVAÇÃO SEGURA ---
+ipcMain.handle('ativar-sistema', async (event, chaveDigitada) => {
+    try {
+        const idHardware = machineIdSync();
+        const chaveEsperada = Buffer.from(idHardware + MEU_SEGREDO).toString('base64');
+
+        if (chaveDigitada === chaveEsperada) {
+            const appData = app.getPath('userData');
+            const pastaLicenca = path.join(appData, 'estoque-toras');
+            const arquivoLicenca = path.join(pastaLicenca, 'license.dat');
+
+            if (!fs.existsSync(pastaLicenca)) {
+                fs.mkdirSync(pastaLicenca, { recursive: true });
+            }
+
+            // Define validade inicial de 30 dias para novas ativações
+            const expiraEm = new Date();
+            expiraEm.setDate(expiraEm.getDate() + 30);
+
+            const novaLicenca = {
+                mid: idHardware,
+                exp: expiraEm.toISOString(),
+                last_seen: new Date().toISOString()
+            };
+            
+            fs.writeFileSync(arquivoLicenca, criptografar(JSON.stringify(novaLicenca)));
+            
+            sistemaAtivado = true;
+            return { success: true, validade: expiraEm.toLocaleDateString() };
+        } else {
+            return { success: false, error: "Chave de licença inválida para este computador." };
+        }
+    } catch (err) {
+        console.error("Erro na ativação:", err);
+        return { success: false, error: "Erro interno ao processar ativação: " + err.message };
+    }
+});
+
 // --- HANDLERS SUPABASE ---
 protectedHandle('supabase-login', async (event, { email, password }) => {
     try {
+        // 1. Tenta Autenticação Online via Supabase
         const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
-        
-        // Registrar login no log local
-        registrarLog(email, 'LOGIN', 'Usuário autenticado via Supabase.');
-        
-        return { success: true, user: data.user };
+
+        if (!error) {
+            // SUCESSO ONLINE: Atualiza o cache de credenciais local
+            const hash = hashPassword(password);
+            db.prepare(`INSERT OR REPLACE INTO usuarios (email, password_hash, last_login) VALUES (?, ?, CURRENT_TIMESTAMP)`).run(email, hash);
+
+            // --- SINCRONIZAÇÃO DE ASSINATURA (OPCIONAL/SAAS) ---
+            try {
+                const { data: assinatura } = await supabase
+                    .from('assinaturas')
+                    .select('valid_until, status')
+                    .eq('email', email)
+                    .single();
+
+                if (assinatura && assinatura.status === 'ativo') {
+                    const appData = app.getPath('userData');
+                    const arquivoLicenca = path.join(appData, 'estoque-toras', 'license.dat');
+                    
+                    const novaLicenca = {
+                        mid: machineIdSync(),
+                        exp: assinatura.valid_until,
+                        last_seen: new Date().toISOString()
+                    };
+                    
+                    fs.writeFileSync(arquivoLicenca, criptografar(JSON.stringify(novaLicenca)));
+                    
+                    // Verifica se a data baixada já está vencida e trava NA HORA
+                    const agora = new Date();
+                    const dataVencimento = new Date(assinatura.valid_until);
+                    
+                    if (agora > dataVencimento) {
+                        console.error(`❌ Assinatura VENCIDA detectada para ${email}. Bloqueando sistema.`);
+                        sistemaAtivado = false;
+                    } else {
+                        console.log(`✅ Assinatura renovada online para: ${email}. Válida até: ${assinatura.valid_until}`);
+                        sistemaAtivado = true;
+                    }
+                }
+            } catch (errSessao) {
+                console.warn("⚠️ Não foi possível sincronizar assinatura, mas o login continuou.");
+            }
+
+            registrarLog(email, 'LOGIN ONLINE', 'Autenticado via Supabase. Cache local atualizado.');
+            return { success: true, user: data.user };
+        }
+
+        // 2. TRATAMENTO DE FALHA: Se for erro de conexão, tenta modo offline
+        const errorMsg = (error.message || "").toLowerCase();
+        const isNetworkError = errorMsg.includes('fetch') ||
+            errorMsg.includes('network') ||
+            errorMsg.includes('load failed') ||
+            error.status === 0 || error.status === null;
+
+        if (isNetworkError) {
+            const userLocal = db.prepare(`SELECT * FROM usuarios WHERE email = ?`).get(email);
+
+            if (userLocal) {
+                const hashDigitado = hashPassword(password);
+                if (hashDigitado === userLocal.password_hash) {
+                    registrarLog(email, 'LOGIN OFFLINE', 'Autenticado via cache local (sem internet).');
+                    // Retorna um objeto de usuário compatível com o que o frontend espera
+                    return {
+                        success: true,
+                        user: { email: userLocal.email, id: 'offline-mode' },
+                        offline: true
+                    };
+                } else {
+                    return { success: false, error: "Senha incorreta para o modo offline." };
+                }
+            } else {
+                return { success: false, error: "Sem conexão. Este usuário nunca logou nesta máquina para permitir acesso offline." };
+            }
+        }
+
+        // Se não for erro de rede, é erro de credenciais no Supabase
+        return { success: false, error: "Credenciais inválidas ou erro no servidor: " + error.message };
+
     } catch (err) {
-        return { success: false, error: err.message };
+        console.error("Erro crítico no login:", err);
+        return { success: false, error: "Erro interno no sistema de login." };
     }
 });
 

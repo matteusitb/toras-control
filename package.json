@@ -1,12 +1,12 @@
 {
   "name": "estoque-toras",
-  "version": "1.0.13",
+  "version": "1.1.0",
   "description": "Sistema profissional para gestão de estoque e romaneio de toras",
   "author": "Matteus Sousa",
-  "main": "main.js",
+  "main": "entry.js",
   "scripts": {
     "start": "node -e \"require('fs').copyFileSync('renderer-dev.js', 'renderer.js')\" && electron .",
-    "build:protect": "javascript-obfuscator renderer-dev.js --output renderer.js --string-array-encoding base64 --split-strings true --debug-protection true",
+    "build:protect": "javascript-obfuscator renderer-dev.js --output renderer.js --string-array-encoding base64 --split-strings true --debug-protection true && bytenode --compile main.js",
     "rebuild": "electron-rebuild -f -w better-sqlite3",
     "release": "npm run build:protect && electron-builder --publish always",
     "dist": "npm run build:protect && electron-builder"
@@ -14,6 +14,8 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.105.3",
     "better-sqlite3": "^11.0.0",
+    "bytenode": "^1.5.7",
+    "dotenv": "^17.4.2",
     "electron-log": "^5.4.3",
     "electron-updater": "^6.7.3",
     "node-machine-id": "^1.1.12",
@@ -70,6 +72,7 @@
     },
     "files": [
       "**/*",
+      "!main.js",
       "!renderer-dev.js",
       "!dist_setup/**/*",
       "!node_modules/*/{test,tests,testing,example,examples,docs}",

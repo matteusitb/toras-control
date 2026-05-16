@@ -25,57 +25,73 @@
 </head>
 
 <body>
-    
+
     <!-- TELA DE LOGIN -->
-    <div id="v-login-screen" class="bg-main" style="display: none; height: 100vh; width: 100vw; align-items: center; justify-content: center; position: fixed; top: 0; left: 0; z-index: 9999;">
+    <div id="v-login-screen" class="bg-main"
+        style="display: none; height: 100vh; width: 100vw; align-items: center; justify-content: center; position: fixed; top: 0; left: 0; z-index: 9999;">
         <div class="form-card shadow-premium" style="max-width: 400px; padding: 40px;">
             <div style="text-align: center; margin-bottom: 30px;">
-                <div class="logo-icon" style="background: var(--active-item-bg); width: 60px; height: 60px; border-radius: 15px; display: flex; align-items: center; justify-content: center; margin: 0 auto 15px;">
+                <div class="logo-icon"
+                    style="background: var(--active-item-bg); width: 60px; height: 60px; border-radius: 15px; display: flex; align-items: center; justify-content: center; margin: 0 auto 15px;">
                     <i data-lucide="zap" style="width: 32px; height: 32px; color: var(--accent-color);"></i>
                 </div>
                 <h2 class="text-title" style="font-weight: 800;">ToraControl</h2>
                 <p class="text-muted" style="font-size: 0.9rem;">Acesse sua conta para continuar</p>
             </div>
-            
+
             <div class="input-container" style="margin-bottom: 20px;">
                 <label>E-mail</label>
-                <input type="email" id="login-email" class="custom-input" placeholder="seu@email.com">
+                <input type="email" id="login-email" class="custom-input" placeholder="seu@email.com"
+                    onkeydown="if(event.key==='Enter'){ document.getElementById('login-senha').focus(); }">
             </div>
-            
+
             <div class="input-container" style="margin-bottom: 30px;">
                 <label>Senha</label>
-                <input type="password" id="login-senha" class="custom-input" placeholder="••••••••">
+                <input type="password" id="login-senha" class="custom-input" placeholder="••••••••"
+                    onkeydown="if(event.key==='Enter'){ realizarLogin(); }">
             </div>
-            
-            <button class="btn-save" onclick="realizarLogin()" style="width: 100%; justify-content: center; padding: 15px;">
-                <i data-lucide="log-in"></i> Entrar no Sistema
+
+            <button id="btn-entrar" class="btn-save" onclick="realizarLogin()"
+                style="width: 100%; justify-content: center; padding: 15px;">
+                <i data-lucide="log-in" id="btn-entrar-icon"></i>
+                <span id="btn-entrar-texto">Entrar no Sistema</span>
             </button>
-            
-            <p id="login-erro" style="color: #ef4444; font-size: 0.85rem; margin-top: 15px; text-align: center; display: none;"></p>
+
+            <p id="login-erro"
+                style="color: #ef4444; font-size: 0.85rem; margin-top: 15px; text-align: center; display: none;"></p>
         </div>
     </div>
 
     <!-- TELA DE ASSINATURA VENCIDA -->
-    <div id="v-expired-screen" class="bg-main" style="display: none; height: 100vh; width: 100vw; align-items: center; justify-content: center; position: fixed; top: 0; left: 0; z-index: 9999;">
+    <div id="v-expired-screen" class="bg-main"
+        style="display: none; height: 100vh; width: 100vw; align-items: center; justify-content: center; position: fixed; top: 0; left: 0; z-index: 9999;">
         <div class="form-card shadow-premium" style="max-width: 450px; padding: 40px; border-top: 5px solid #ef4444;">
             <div style="text-align: center; margin-bottom: 30px;">
-                <div class="logo-icon" style="background: #fee2e2; width: 70px; height: 70px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 15px;">
+                <div class="logo-icon"
+                    style="background: #fee2e2; width: 70px; height: 70px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 15px;">
                     <i data-lucide="calendar-off" style="width: 35px; height: 35px; color: #ef4444;"></i>
                 </div>
                 <h2 class="text-title" style="font-weight: 800; color: #b91c1c;">Acesso Suspenso</h2>
-                <p class="text-muted" style="font-size: 0.95rem; margin-top: 10px;">Sua assinatura mensal expirou. Para continuar utilizando o sistema, realize o pagamento ou entre em contato com o administrador.</p>
-            </div>
-            
-            <div style="background: #f8fafc; border-radius: 12px; padding: 20px; margin-bottom: 25px; border: 1px solid #e2e8f0;">
-                <p style="font-size: 0.85rem; color: #64748b; margin-bottom: 5px; text-align: center;">ID desta Máquina (para renovação offline):</p>
-                <p id="expired-machine-id" style="font-family: monospace; font-size: 0.8rem; background: #fff; padding: 10px; border-radius: 6px; text-align: center; border: 1px dashed #cbd5e1; word-break: break-all;"></p>
+                <p class="text-muted" style="font-size: 0.95rem; margin-top: 10px;">Sua assinatura mensal expirou. Para
+                    continuar utilizando o sistema, realize o pagamento ou entre em contato com o administrador.</p>
             </div>
 
-            <button class="btn-save" onclick="verificarPagamentoAgora()" style="width: 100%; justify-content: center; padding: 15px; margin-bottom: 15px; background: #2563eb;">
+            <div
+                style="background: #f8fafc; border-radius: 12px; padding: 20px; margin-bottom: 25px; border: 1px solid #e2e8f0;">
+                <p style="font-size: 0.85rem; color: #64748b; margin-bottom: 5px; text-align: center;">ID desta Máquina
+                    (para renovação offline):</p>
+                <p id="expired-machine-id"
+                    style="font-family: monospace; font-size: 0.8rem; background: #fff; padding: 10px; border-radius: 6px; text-align: center; border: 1px dashed #cbd5e1; word-break: break-all;">
+                </p>
+            </div>
+
+            <button class="btn-save" onclick="verificarPagamentoAgora()"
+                style="width: 100%; justify-content: center; padding: 15px; margin-bottom: 15px; background: #2563eb;">
                 <i data-lucide="refresh-cw"></i> Já paguei, verificar agora
             </button>
-            
-            <button class="btn-outline" onclick="abrirModalAtivacao()" style="width: 100%; justify-content: center; padding: 12px; border: 1px solid #e2e8f0; background: white; color: #64748b; display: flex; align-items: center; gap: 8px; cursor: pointer; border-radius: 8px;">
+
+            <button class="btn-outline" onclick="abrirModalAtivacao()"
+                style="width: 100%; justify-content: center; padding: 12px; border: 1px solid #e2e8f0; background: white; color: #64748b; display: flex; align-items: center; gap: 8px; cursor: pointer; border-radius: 8px;">
                 <i data-lucide="key" style="width: 16px;"></i> Inserir código de renovação
             </button>
         </div>
@@ -95,7 +111,7 @@
 
             <ul class="components">
                 <li class="active" onclick="carregarTela('home', this)" data-tooltip="Dashboard">
-                    <a href="#"><i data-lucide="layout-grid"></i> <span class="nav-text">Dashboard - </span></a>
+                    <a href="#"><i data-lucide="layout-grid"></i> <span class="nav-text">Dashboard</span></a>
                 </li>
                 <li onclick="carregarTela('especies', this)" data-tooltip="Espécies">
                     <a href="#"><i data-lucide="leaf"></i> <span class="nav-text">Cadastro de Espécies</span></a>
@@ -159,8 +175,7 @@
                             <input type="text" id="busca-global-numero" placeholder="Buscar Número..."
                                 onblur="aplicarMascaraNumero(this)"
                                 onkeyup="if(event.key === 'Enter') { aplicarMascaraNumero(this); buscarNumeroGlobal(); }"
-                                maxlength="10"
-                                class="bg-input border-subtle"
+                                maxlength="10" class="bg-input border-subtle"
                                 style="width: 100%; padding: 12px 16px 12px 42px; border-radius: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); outline: none; transition: all 0.2s; font-size: 0.95rem;">
                         </div>
                     </div>
@@ -223,7 +238,7 @@
                                 <div id="dash-lista-lotes"></div>
                             </div>
                             <div class="dash-lotes-container">
-                                <h4>Ranking de Espécies</h4>
+                                <h4>Ranking de Espécies em Estoque</h4>
                                 <div id="dash-ranking-especies"></div>
                             </div>
                             <div class="dash-lotes-container">
@@ -303,7 +318,8 @@
                                 <div class="result-info">
                                     <span>Volume Líquido Calculado</span>
                                     <h2 id="volume-result">0,000 m³</h2>
-                                    <small id="detalhe-calculo" class="text-muted" style="font-size: 10px; opacity: 0.8;"></small>
+                                    <small id="detalhe-calculo" class="text-muted"
+                                        style="font-size: 10px; opacity: 0.8;"></small>
                                 </div>
                                 <div class="result-icon"><i data-lucide="calculator"></i></div>
                             </div>
@@ -348,15 +364,17 @@
 
                 <div id="v-especies" class="view">
                     <div class="form-card" style="margin-bottom: 30px;">
-                        <div class="form-header" style="display: flex; justify-content: space-between; align-items: center;">
+                        <div class="form-header"
+                            style="display: flex; justify-content: space-between; align-items: center;">
                             <div style="display: flex; align-items: center; gap: 15px;">
                                 <div class="header-icon"><i data-lucide="leaf"></i></div>
                                 <div>
                                     <h3>Gestão de Espécies (Nuvem)</h3>
-                                    <p>As espécies são gerenciadas via Supabase. Clique para atualizar a lista local.</p>
+                                    <p>As espécies são gerenciadas via Nuvem. Clique para atualizar a lista local.</p>
                                 </div>
                             </div>
-                             <button class="btn-save" onclick="sincronizarEspecies()" style="background: var(--badge-success-text);">
+                            <button class="btn-save" onclick="sincronizarEspecies()"
+                                style="background: var(--badge-success-text);">
                                 <i data-lucide="refresh-cw"></i> <span>Sincronizar com a Nuvem</span>
                             </button>
                         </div>
@@ -446,8 +464,7 @@
                 <div id="v-baixas" class="view">
                     <div class="form-card">
                         <div class="form-header">
-                             <div class="header-icon bg-dash-red"><i
-                                    data-lucide="arrow-up-right"></i></div>
+                            <div class="header-icon bg-dash-red"><i data-lucide="arrow-up-right"></i></div>
                             <div>
                                 <h3>Baixa de Estoque / Romaneio</h3>
                                 <p>Selecione os números para saída do pátio</p>
@@ -489,13 +506,12 @@
                                 <tbody id="lista-baixa-temporaria"></tbody>
                             </table>
 
-                             <div class="result-panel bg-input border-subtle"
-                                style="margin-top: 20px;">
+                            <div class="result-panel" style="margin-top: 20px;">
                                 <div class="result-info">
-                                    <span class="text-muted">Resumo do Romaneio</span>
-                                    <h2 id="total-volume-baixa" class="text-title">0,000 m³</h2>
-                                    <p id="total-toras-baixa"
-                                        style="font-size: 14px; font-weight: 600; color: #6366f1;">0 Toras selecionadas
+                                    <span>Resumo do Romaneio</span>
+                                    <h2 id="total-volume-baixa">0,000 m³</h2>
+                                    <p id="total-toras-baixa" style="font-size: 14px; font-weight: 600; opacity: 0.85;">
+                                        0 Toras selecionadas
                                     </p>
                                 </div>
                                 <div class="result-icon"><i data-lucide="file-text"></i></div>
@@ -517,7 +533,7 @@
                         <div class="form-header"
                             style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
                             <div style="display: flex; align-items: center; gap: 15px;">
-                                 <div class="header-icon bg-dash-blue">
+                                <div class="header-icon bg-dash-blue">
                                     <i data-lucide="database"></i>
                                 </div>
                                 <div>
@@ -533,7 +549,7 @@
                         </div>
 
                         <div class="form-body">
-                             <div class="form-row" style="margin-bottom: 25px;">
+                            <div class="form-row" style="margin-bottom: 25px;">
                                 <div class="input-container bg-input border-subtle"
                                     style="padding: 15px; border-radius: 12px; border: 1px solid;">
                                     <label
@@ -657,7 +673,7 @@
                                 <div class="input-container"></div>
                             </div>
 
-                             <div class="result-panel bg-input border-subtle" style="margin-top: 20px;">
+                            <div class="result-panel" style="margin-top: 20px;">
                                 <div class="result-info">
                                     <span>Volume Total Filtrado</span>
                                     <h2 id="rel-total-vol">0,000 m³</h2>
@@ -733,7 +749,7 @@
                 <div id="v-logs" class="view">
                     <div class="form-card">
                         <div class="form-header">
-                             <div class="header-icon bg-input border-subtle" style="color: var(--text-main);">
+                            <div class="header-icon bg-input border-subtle" style="color: var(--text-main);">
                                 <i data-lucide="scroll-text"></i>
                             </div>
                             <div>
@@ -742,7 +758,7 @@
                             </div>
                         </div>
                         <div class="form-body">
-                             <div class="filtros-estoque bg-input border-subtle"
+                            <div class="filtros-estoque bg-input border-subtle"
                                 style="display: grid; grid-template-columns: 1.5fr 1fr 1fr auto; gap: 10px; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid;">
                                 <div>
                                     <label>Ação:</label>
@@ -832,11 +848,12 @@
                             </div>
                         </div>
                         <div class="form-body">
-                             <div class="bg-input border-subtle"
+                            <div class="bg-input border-subtle"
                                 style="display: flex; align-items: center; justify-content: space-between; padding: 20px; border-radius: 8px; border: 1px solid;">
-                                 <div>
+                                <div>
                                     <h4 class="text-title" style="margin-bottom: 5px;">Gerar Backup (.db)</h4>
-                                    <p class="text-muted" style="font-size: 13px;">Crie uma cópia completa de todas as suas
+                                    <p class="text-muted" style="font-size: 13px;">Crie uma cópia completa de todas as
+                                        suas
                                         toras, espécies e lotes.</p>
                                 </div>
                                 <button class="btn-save" onclick="fazerBackup()"
@@ -848,7 +865,8 @@
 
                     <div class="form-card" style="margin-bottom: 20px; border-top: 4px solid #10b981;">
                         <div class="form-header">
-                            <div class="header-icon" style="background: #dcfce7; color: #10b981;"><i data-lucide="clock"></i></div>
+                            <div class="header-icon" style="background: #dcfce7; color: #10b981;"><i
+                                    data-lucide="clock"></i></div>
                             <div>
                                 <h3>Backup Automático Agendado</h3>
                                 <p>Configure horários para salvar cópias de segurança automaticamente</p>
@@ -858,21 +876,26 @@
                             <div class="form-row">
                                 <div class="input-container">
                                     <label>Horários de Backup (Separados por vírgula)</label>
-                                    <input type="text" id="cfg-backup-horarios" class="custom-input" placeholder="Ex: 12:00, 18:00">
+                                    <input type="text" id="cfg-backup-horarios" class="custom-input"
+                                        placeholder="Ex: 12:00, 18:00">
                                 </div>
                                 <div class="input-container" style="grid-column: span 2;">
                                     <label>Pasta de Destino (Google Drive)</label>
                                     <div style="display: flex; gap: 10px;">
-                                        <input type="text" id="cfg-backup-pasta" class="custom-input" style="flex: 1;" readonly placeholder="Clique no botão para selecionar...">
-                                        <button class="btn-save" onclick="selecionarPastaBackup()" style="background: #64748b; width: auto;">
+                                        <input type="text" id="cfg-backup-pasta" class="custom-input" style="flex: 1;"
+                                            readonly placeholder="Clique no botão para selecionar...">
+                                        <button class="btn-save" onclick="selecionarPastaBackup()"
+                                            style="background: #64748b; width: auto;">
                                             <i data-lucide="folder-open"></i> Selecionar
                                         </button>
                                     </div>
                                 </div>
                             </div>
                             <div style="margin-top: 10px; display: flex; align-items: center; gap: 10px;">
-                                <input type="checkbox" id="cfg-backup-ativo" style="width: 18px; height: 18px; cursor: pointer;">
-                                <label for="cfg-backup-ativo" style="font-weight: 600; cursor: pointer;">Ativar Backup Automático</label>
+                                <input type="checkbox" id="cfg-backup-ativo"
+                                    style="width: 18px; height: 18px; cursor: pointer;">
+                                <label for="cfg-backup-ativo" style="font-weight: 600; cursor: pointer;">Ativar Backup
+                                    Automático</label>
                             </div>
                         </div>
                         <div class="form-footer">
@@ -892,7 +915,7 @@
                             </div>
                         </div>
                         <div class="form-body">
-                             <div class="bg-dash-red border-subtle"
+                            <div class="bg-dash-red border-subtle"
                                 style="display: flex; align-items: center; justify-content: space-between; padding: 20px; border-radius: 8px; border: 1px solid;">
                                 <div>
                                     <h4 style="color: #991b1b; margin-bottom: 5px;">Resetar Banco de Dados</h4>

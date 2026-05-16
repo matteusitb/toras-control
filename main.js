@@ -30,7 +30,7 @@ function descriptografar(texto) {
     }
 }
 
-// --- CONFIGURAÇÃO SUPABASE ---
+// --- CONFIGURAÇÃO NUVEM ---
 const supabaseUrl = process.env.SUPABASE_URL || 'https://hmuxkqtgyyglafqlqggv.supabase.co';
 const supabaseKey = process.env.SUPABASE_KEY || 'sb_publishable_G--VZElf06QOrBbxIFKvhA_GE1eOJwI';
 const supabase = createClient(supabaseUrl, supabaseKey, {
@@ -431,7 +431,7 @@ protectedHandle('get-especies', async () => {
     return db.prepare("SELECT * FROM especies ORDER BY nome").all();
 });
 
-// NOVO: Sincronização de Espécies (Bulk Upsert do Supabase)
+// NOVO: Sincronização de Espécies (Bulk Upsert da Nuvem)
 protectedHandle('sync-especies-local', async (event, especies) => {
     try {
         const insert = db.prepare(`
@@ -453,7 +453,7 @@ protectedHandle('sync-especies-local', async (event, especies) => {
         });
 
         transaction(especies);
-        registrarLog('Sistema', 'SYNC', `Sincronizadas ${especies.length} espécies do Supabase.`);
+        registrarLog('Sistema', 'SYNC', `Sincronizadas ${especies.length} espécies da Nuvem.`);
         return { success: true };
     } catch (err) {
         console.error("Erro na sincronização:", err);
@@ -550,7 +550,7 @@ protectedHandle('excluir-tora', async (event, id) => {
         if (!tora) throw new Error("Tora não encontrada.");
 
         if (tora.status === 'serrada') {
-            throw new Error(`A Tora Número ${tora.codigo} ya foi baixada (serrada) e não pode ser excluída.`);
+            throw new Error(`A Tora Número ${tora.codigo} já foi baixada (serrada) e não pode ser excluída.`);
         }
 
         db.prepare('DELETE FROM toras WHERE id = ?').run(id);
@@ -769,7 +769,7 @@ protectedHandle('buscar-tora-por-numero', async (event, numero) => {
 protectedHandle('estornar-baixa-tora', async (event, idTora, numeroTora) => {
     try {
         const stmt = db.prepare(`
-            UPDATE estoque 
+            UPDATE toras 
             SET status = 'pátio', data_saida = NULL 
             WHERE id = ?
         `);
@@ -778,9 +778,10 @@ protectedHandle('estornar-baixa-tora', async (event, idTora, numeroTora) => {
 
         if (resultado.changes > 0) {
             // Registrar no Log o estorno
-            registrarLog('Estorno', `Estorno de baixa realizado. Tora ${numeroTora} retornou ao pátio.`);
+            registrarLog('Estorno', 'ESTORNO', `Estorno de baixa realizado. Tora ${numeroTora} retornou ao pátio.`);
             return { success: true };
         }
+        return { success: false, error: 'Registro não encontrado.' };
     } catch (error) {
         return { success: false, error: error.message };
     }
@@ -1124,7 +1125,7 @@ ipcMain.handle('sincronizar-assinatura-forced', async () => {
         }
 
         const email = ultimoUsuario.email;
-        console.log(`📡 [SYNC] Consultando Supabase para: ${email}...`);
+        console.log(`📡 [SYNC] Consultando Nuvem para: ${email}...`);
 
         // Timeout manual de 10 segundos para não travar o app
         const { data: assinatura, error } = await supabase
@@ -1134,7 +1135,7 @@ ipcMain.handle('sincronizar-assinatura-forced', async () => {
             .single();
 
         if (error) {
-            console.error("❌ [SYNC] Erro Supabase:", error.message);
+            console.error("❌ [SYNC] Erro Nuvem:", error.message);
             return { success: false, error: "Erro no servidor: " + error.message };
         }
 
@@ -1308,10 +1309,10 @@ ipcMain.handle('ativar-sistema', async (event, chaveDigitada) => {
     }
 });
 
-// --- HANDLERS SUPABASE ---
+// --- HANDLERS NUVEM ---
 protectedHandle('supabase-login', async (event, { email, password }) => {
     try {
-        // 1. Tenta Autenticação Online via Supabase
+        // 1. Tenta Autenticação Online via Nuvem
         const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
         if (!error) {
@@ -1355,7 +1356,7 @@ protectedHandle('supabase-login', async (event, { email, password }) => {
                 console.warn("⚠️ Não foi possível sincronizar assinatura, mas o login continuou.");
             }
 
-            registrarLog(email, 'LOGIN ONLINE', 'Autenticado via Supabase. Cache local atualizado.');
+            registrarLog(email, 'LOGIN ONLINE', 'Autenticado via Nuvem. Cache local atualizado.');
             return { success: true, user: data.user };
         }
 
@@ -1387,7 +1388,7 @@ protectedHandle('supabase-login', async (event, { email, password }) => {
             }
         }
 
-        // Se não for erro de rede, é erro de credenciais no Supabase
+        // Se não for erro de rede, é erro de credenciais na Nuvem
         return { success: false, error: "Credenciais inválidas ou erro no servidor: " + error.message };
 
     } catch (err) {
@@ -1402,7 +1403,7 @@ protectedHandle('supabase-fetch-especies', async () => {
         if (error) throw error;
         return { success: true, data };
     } catch (err) {
-        console.error("❌ Erro ao buscar espécies no Supabase:", err.message);
+        console.error("❌ Erro ao buscar espécies na Nuvem:", err.message);
         return { success: false, error: err.message };
     }
 });

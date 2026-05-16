@@ -93,18 +93,22 @@ body.dark-mode .swal2-popup {
     color: var(--text-dark) !important;
     border: 1px solid var(--border-color);
 }
-body.dark-mode .swal2-title, 
+
+body.dark-mode .swal2-title,
 body.dark-mode .swal2-content,
 body.dark-mode .swal2-html-container {
     color: var(--text-dark) !important;
 }
+
 body.dark-mode .swal2-footer {
     border-top: 1px solid var(--border-color);
     color: var(--text-main);
 }
+
 body.dark-mode .swal2-close {
     color: var(--text-main);
 }
+
 body.dark-mode .swal2-input {
     background-color: var(--input-bg) !important;
     color: var(--text-dark) !important;
@@ -135,20 +139,58 @@ body {
 }
 
 /* UTILITÁRIOS PARA REMOVER ESTILOS INLINE */
-.text-title { color: var(--text-dark) !important; }
-.text-muted { color: var(--text-main) !important; }
-.bg-surface { background: var(--card-bg) !important; }
-.bg-main { background: var(--main-bg) !important; }
-.bg-input { background: var(--input-bg) !important; }
-.border-subtle { border-color: var(--border-color) !important; }
-.shadow-premium { box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05) !important; }
-body.dark-mode .shadow-premium { box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -2px rgba(0, 0, 0, 0.2) !important; }
+.text-title {
+    color: var(--text-dark) !important;
+}
+
+.text-muted {
+    color: var(--text-main) !important;
+}
+
+.bg-surface {
+    background: var(--card-bg) !important;
+}
+
+.bg-main {
+    background: var(--main-bg) !important;
+}
+
+.bg-input {
+    background: var(--input-bg) !important;
+}
+
+.border-subtle {
+    border-color: var(--border-color) !important;
+}
+
+.shadow-premium {
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05) !important;
+}
+
+body.dark-mode .shadow-premium {
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -2px rgba(0, 0, 0, 0.2) !important;
+}
 
 /* Dashboard Card Utilities */
-.bg-dash-green { background: var(--dash-green-bg) !important; color: var(--dash-green-text) !important; }
-.bg-dash-blue { background: var(--dash-blue-bg) !important; color: var(--dash-blue-text) !important; }
-.bg-dash-yellow { background: var(--dash-yellow-bg) !important; color: var(--dash-yellow-text) !important; }
-.bg-dash-red { background: var(--dash-red-bg) !important; color: var(--dash-red-text) !important; }
+.bg-dash-green {
+    background: var(--dash-green-bg) !important;
+    color: var(--dash-green-text) !important;
+}
+
+.bg-dash-blue {
+    background: var(--dash-blue-bg) !important;
+    color: var(--dash-blue-text) !important;
+}
+
+.bg-dash-yellow {
+    background: var(--dash-yellow-bg) !important;
+    color: var(--dash-yellow-text) !important;
+}
+
+.bg-dash-red {
+    background: var(--dash-red-bg) !important;
+    color: var(--dash-red-text) !important;
+}
 
 .wrapper {
     display: flex;
@@ -168,15 +210,18 @@ body.dark-mode .shadow-premium { box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.4)
 .main-wrapper.expanded {
     margin-left: 80px;
 }
+
 /* Configuração do Tooltip */
 #sidebar.minimized li[data-tooltip] {
     position: relative;
 }
 
 #sidebar.minimized li[data-tooltip]::after {
-    content: attr(data-tooltip); /* Pega o texto do atributo HTML */
+    content: attr(data-tooltip);
+    /* Pega o texto do atributo HTML */
     position: absolute;
-    left: 100%; /* Aparece à direita do ícone */
+    left: 100%;
+    /* Aparece à direita do ícone */
     top: 50%;
     transform: translateY(-50%);
     margin-left: 10px;
@@ -192,7 +237,7 @@ body.dark-mode .shadow-premium { box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.4)
     transition: opacity 0.2s;
     pointer-events: none;
     z-index: 9999;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
 /* Mostra o balão ao passar o mouse apenas se estiver minimizado */
@@ -467,6 +512,16 @@ select:focus {
     to {
         opacity: 1;
         transform: translateY(0);
+    }
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
     }
 }
 
@@ -903,7 +958,7 @@ body.dark-mode .result-panel {
 }
 
 #total-volume-baixa {
-    color: #6366f1;
+    color: #e2e8f0;
     /* Roxo padrão */
     font-weight: 700;
 }

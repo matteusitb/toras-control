@@ -13,7 +13,9 @@ const _s = [84, 79, 82, 65, 83, 50, 48, 50, 54]; // TORAS2026
 const MEU_SEGREDO = process.env.APP_SECRET || String.fromCharCode(..._s);
 
 function criptografar(texto) {
-    const cipher = crypto.createCipher('aes-256-cbc', MEU_SEGREDO);
+    const key = crypto.createHash('sha256').update(MEU_SEGREDO).digest();
+    const iv = crypto.createHash('md5').update(MEU_SEGREDO).digest();
+    const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
     let crypted = cipher.update(texto, 'utf8', 'hex');
     crypted += cipher.final('hex');
     return crypted;
@@ -21,13 +23,46 @@ function criptografar(texto) {
 
 function descriptografar(texto) {
     try {
-        const decipher = crypto.createDecipher('aes-256-cbc', MEU_SEGREDO);
+        const key = crypto.createHash('sha256').update(MEU_SEGREDO).digest();
+        const iv = crypto.createHash('md5').update(MEU_SEGREDO).digest();
+        const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
         let dec = decipher.update(texto, 'hex', 'utf8');
         dec += decipher.final('utf8');
         return dec;
     } catch (e) {
-        return null;
+        // FALLBACK: Tenta descriptografar usando o método antigo depreciado
+        try {
+            const decipher = crypto.createDecipher('aes-256-cbc', MEU_SEGREDO);
+            let dec = decipher.update(texto, 'hex', 'utf8');
+            dec += decipher.final('utf8');
+            return dec;
+        } catch (errFallback) {
+            return null;
+        }
     }
+}
+
+function parseRomaneioParaOrdenacao(valor) {
+    if (!valor) return null;
+    let s = valor.toString().trim().toUpperCase();
+    
+    // Tenta casar (ROM-)?(número)/(ano)
+    const match = s.match(/^(?:ROM-)?(\d+)\/(\d{4})$/i);
+    if (match) {
+        const numSeq = parseInt(match[1], 10);
+        const ano = parseInt(match[2], 10);
+        return ano * 100000 + numSeq;
+    }
+    
+    // Tenta casar apenas um número sequencial (ex: "5" ou "05"), assumindo o ano atual
+    const matchSimples = s.match(/^(?:ROM-)?(\d+)$/i);
+    if (matchSimples) {
+        const numSeq = parseInt(matchSimples[1], 10);
+        const ano = new Date().getFullYear();
+        return ano * 100000 + numSeq;
+    }
+    
+    return null;
 }
 
 // --- CONFIGURAÇÃO NUVEM ---
@@ -197,7 +232,9 @@ db.exec(`
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         numero TEXT UNIQUE NOT NULL, -- Número do Lote [cite: 2026-01-17]
         descricao TEXT,
-        data_criacao DATETIME DEFAULT CURRENT_TIMESTAMP
+        data_criacao DATETIME DEFAULT CURRENT_TIMESTAMP,
+        sync_status TEXT DEFAULT 'pending',
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS toras (
@@ -214,6 +251,8 @@ db.exec(`
         status TEXT DEFAULT 'pátio',
         data_entrada DATETIME DEFAULT CURRENT_TIMESTAMP,
         data_saida TEXT,
+        sync_status TEXT DEFAULT 'pending',
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (especie_id) REFERENCES especies(id),
         FOREIGN KEY (lote_id) REFERENCES lotes(id)
     );
@@ -229,8 +268,82 @@ db.exec(`
     CREATE TABLE IF NOT EXISTS usuarios (
         email TEXT PRIMARY KEY,
         password_hash TEXT NOT NULL,
+        password_salt TEXT,
         last_login DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS romaneios (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        numero TEXT UNIQUE NOT NULL,   -- Número do Romaneio
+        data TEXT NOT NULL,            -- YYYY-MM-DD
+        fornecedor TEXT,
+        motorista TEXT,
+        observacoes TEXT,
+        data_criacao DATETIME DEFAULT CURRENT_TIMESTAMP,
+        sync_status TEXT DEFAULT 'pending',
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS fornecedores (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nome TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS motoristas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nome TEXT NOT NULL,
+        cpf TEXT,
+        cnh TEXT,
+        placa_veiculo TEXT,
+        telefone TEXT,
+        comissao REAL DEFAULT 0,
+        salario REAL DEFAULT 0,
+        data_criacao DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS motorista_fechamentos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        motorista_id INTEGER NOT NULL,
+        data_fechamento TEXT NOT NULL,
+        periodo_inicio TEXT NOT NULL,
+        periodo_fim TEXT NOT NULL,
+        romaneio_inicio TEXT,
+        romaneio_fim TEXT,
+        valor_salario REAL NOT NULL,
+        valor_comissao REAL NOT NULL,
+        valor_vales REAL NOT NULL,
+        valor_liquido REAL NOT NULL,
+        observacoes TEXT,
+        data_criacao DATETIME DEFAULT CURRENT_TIMESTAMP,
+        sync_status TEXT DEFAULT 'pending',
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (motorista_id) REFERENCES motoristas(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS motorista_vales (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        motorista_id INTEGER NOT NULL,
+        valor REAL NOT NULL,
+        data TEXT NOT NULL,
+        descricao TEXT,
+        status TEXT DEFAULT 'aberto',
+        fechamento_id INTEGER,
+        data_criacao DATETIME DEFAULT CURRENT_TIMESTAMP,
+        sync_status TEXT DEFAULT 'pending',
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (motorista_id) REFERENCES motoristas(id),
+        FOREIGN KEY (fechamento_id) REFERENCES motorista_fechamentos(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_toras_codigo ON toras(codigo);
+    CREATE INDEX IF NOT EXISTS idx_toras_status ON toras(status);
+    CREATE INDEX IF NOT EXISTS idx_toras_lote ON toras(lote_id);
+    CREATE INDEX IF NOT EXISTS idx_logs_data ON logs(data_hora);
+    CREATE INDEX IF NOT EXISTS idx_toras_especie ON toras(especie_id);
+    CREATE INDEX IF NOT EXISTS idx_romaneios_fornecedor ON romaneios(fornecedor_id);
+    CREATE INDEX IF NOT EXISTS idx_romaneios_motorista ON romaneios(motorista_id);
+    CREATE INDEX IF NOT EXISTS idx_motorista_vales_motorista ON motorista_vales(motorista_id);
+    CREATE INDEX IF NOT EXISTS idx_motorista_fechamentos_motorista ON motorista_fechamentos(motorista_id);
 `);
 
 // Migrações para adaptar o banco anterior ao novo modelo de cubagem
@@ -240,70 +353,73 @@ try { db.exec("ALTER TABLE toras ADD COLUMN desconto_2 INTEGER DEFAULT 0;"); } c
 try { db.exec("ALTER TABLE toras ADD COLUMN total_desconto REAL DEFAULT 0;"); } catch (e) { }
 try { db.exec("ALTER TABLE toras ADD COLUMN status TEXT DEFAULT 'pátio';"); } catch (e) { }
 try { db.exec("ALTER TABLE toras ADD COLUMN data_saida TEXT;"); } catch (e) { }
+try { db.exec("ALTER TABLE toras ADD COLUMN volume_bruto REAL DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE toras ADD COLUMN rodo_bruto INTEGER DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE toras ADD COLUMN comprimento_bruto REAL DEFAULT 0;"); } catch (e) { }
+// Migração: vinculação de toras a romaneios
+try { db.exec("ALTER TABLE toras ADD COLUMN romaneio_id INTEGER REFERENCES romaneios(id);"); } catch (e) { }
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_toras_romaneio ON toras(romaneio_id);"); } catch (e) { }
+try { db.exec("ALTER TABLE romaneios ADD COLUMN fornecedor_id INTEGER REFERENCES fornecedores(id);"); } catch (e) { }
+try { db.exec("ALTER TABLE romaneios ADD COLUMN motorista_id INTEGER REFERENCES motoristas(id);"); } catch (e) { }
+try { db.exec("ALTER TABLE romaneios ADD COLUMN frete_valor REAL DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE romaneios ADD COLUMN frete_total REAL DEFAULT 0;"); } catch (e) { }
+
+// Migrações para suporte a Sincronização em Nuvem (Cloud Sync)
+try { db.exec("ALTER TABLE toras ADD COLUMN sync_status TEXT DEFAULT 'pending';"); } catch (e) { }
+try { db.exec("ALTER TABLE toras ADD COLUMN updated_at DATETIME;"); } catch (e) { }
+try { db.exec("UPDATE toras SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE lotes ADD COLUMN sync_status TEXT DEFAULT 'pending';"); } catch (e) { }
+try { db.exec("ALTER TABLE lotes ADD COLUMN updated_at DATETIME;"); } catch (e) { }
+try { db.exec("UPDATE lotes SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL;"); } catch (e) { }
+try { db.exec("ALTER TABLE romaneios ADD COLUMN sync_status TEXT DEFAULT 'pending';"); } catch (e) { }
+try { db.exec("ALTER TABLE romaneios ADD COLUMN updated_at DATETIME;"); } catch (e) { }
+try { db.exec("UPDATE romaneios SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL;"); } catch (e) { }
+
+// Migrações para senha com criptografia forte (PBKDF2)
+try { db.exec("ALTER TABLE usuarios ADD COLUMN password_salt TEXT;"); } catch (e) { }
 
 // --- JANELA PRINCIPAL COM TRAVAS DE PRODUÇÃO ---
 const packageInfo = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
 function createWindow() {
-    // 1. Criar a janela de Splash (Loader)
-    // Cria o Splash (Loader)
-    splash = new BrowserWindow({
-        width: 450,
-        height: 350,
-        frame: false,
-        transparent: true,
-        alwaysOnTop: true,
-        webPreferences: { nodeIntegration: true }
-    });
-    splash.loadFile('splash.html');
-
     mainWindow = new BrowserWindow({
         width: 1280,
         height: 800,
         minWidth: 800,
         title: `${packageInfo.productName || "Controle de Toras"} - v${packageInfo.version || "1.0.0"}`,
-        show: false,
+        show: true,
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
             preload: path.join(__dirname, 'preload.js'),
-            devTools: !app.isPackaged
+            devTools: false
         }
-    });
-    mainWindow.on('closed', () => {
-        if (splash && !splash.isDestroyed()) {
-            splash.destroy();
-        }
-        mainWindow = null;
     });
 
-    mainWindow.once('ready-to-show', () => {
-        setTimeout(() => {
-            splash.close();
-            mainWindow.show();
-            mainWindow.maximize(); // Se quiser que já abra grande
-        }, 1500);
-        setupAutoUpdater(mainWindow);
-    });
+    mainWindow.maximize();
     mainWindow.setMenu(null); // Layout limpo conforme solicitado [cite: 2026-01-16]
     mainWindow.loadFile('index.html');
+    setupAutoUpdater(mainWindow);
+
+    mainWindow.on('closed', () => {
+        mainWindow = null;
+    });
 
     // Opcional: Impedir que o site mude o título (alguns HTMLs sobrescrevem o título)
     mainWindow.on('page-title-updated', (evt) => {
         evt.preventDefault();
     });
-    // 2. Bloqueio de atalhos de teclado (F5, Ctrl+R, Ctrl+Shift+I)
-    // Impede que o cliente recarregue a página ou tente forçar o DevTools
+    // 2. Bloqueio completo de atalhos de desenvolvedor (F5, Ctrl+R, F12, Ctrl+Shift+I)
     mainWindow.webContents.on('before-input-event', (event, input) => {
         const isControlOrCommand = input.control || input.meta;
+        const key = input.key.toLowerCase();
 
-        // Bloqueia F5 e Ctrl+R (Reload)
-        if (input.key === 'F5' || (isControlOrCommand && input.key.toLowerCase() === 'r')) {
-            event.preventDefault();
-        }
-
-        // Bloqueia Ctrl+Shift+I e F12 (Inspeção) em produção
-        if (app.isPackaged) {
-            if ((isControlOrCommand && input.shift && input.key.toLowerCase() === 'i') || input.key === 'F12') {
+        if (input.type === 'keyDown') {
+            // Bloqueia recarregamento (F5 / Ctrl+R)
+            if (key === 'f5' || (isControlOrCommand && key === 'r')) {
+                event.preventDefault();
+            }
+            // Bloqueia abertura de DevTools (F12 / Ctrl+Shift+I)
+            if (key === 'f12' || (isControlOrCommand && input.shift && key === 'i')) {
                 event.preventDefault();
             }
         }
@@ -389,6 +505,101 @@ async function executarBackupAutomatico(pastaDestino, hora) {
     }
 }
 
+// --- LÓGICA DE SINCRONIZAÇÃO EM SEGUNDO PLANO (CLOUD SYNC ENGINE) ---
+async function sincronizarDadosPendentes() {
+    try {
+        const session = await supabase.auth.getSession();
+        if (!session || !session.data || !session.data.session) {
+            return;
+        }
+
+        // 1. Sincroniza Lotes
+        const lotesPendentes = db.prepare("SELECT * FROM lotes WHERE sync_status = 'pending' LIMIT 50").all();
+        if (lotesPendentes.length > 0) {
+            console.log(`📡 [SYNC] Sincronizando ${lotesPendentes.length} lotes com a Nuvem...`);
+            const payload = lotesPendentes.map(l => ({
+                id: l.id,
+                numero: l.numero,
+                descricao: l.descricao,
+                data_criacao: l.data_criacao
+            }));
+            const { error } = await supabase.from('lotes').upsert(payload);
+            if (!error) {
+                const stmt = db.prepare("UPDATE lotes SET sync_status = 'synced' WHERE id = ?");
+                lotesPendentes.forEach(l => stmt.run(l.id));
+            } else {
+                throw new Error("Erro Lotes: " + error.message);
+            }
+        }
+
+        // 2. Sincroniza Romaneios
+        const romaneiosPendentes = db.prepare("SELECT * FROM romaneios WHERE sync_status = 'pending' LIMIT 50").all();
+        if (romaneiosPendentes.length > 0) {
+            console.log(`📡 [SYNC] Sincronizando ${romaneiosPendentes.length} romaneios com a Nuvem...`);
+            const payload = romaneiosPendentes.map(r => ({
+                id: r.id,
+                numero: r.numero,
+                data: r.data,
+                fornecedor: r.fornecedor,
+                motorista: r.motorista,
+                observacoes: r.observacoes,
+                data_criacao: r.data_criacao,
+                fornecedor_id: r.fornecedor_id,
+                motorista_id: r.motorista_id,
+                frete_valor: r.frete_valor,
+                frete_total: r.frete_total
+            }));
+            const { error } = await supabase.from('romaneios').upsert(payload);
+            if (!error) {
+                const stmt = db.prepare("UPDATE romaneios SET sync_status = 'synced' WHERE id = ?");
+                romaneiosPendentes.forEach(r => stmt.run(r.id));
+            } else {
+                throw new Error("Erro Romaneios: " + error.message);
+            }
+        }
+
+        // 3. Sincroniza Toras
+        const torasPendentes = db.prepare("SELECT * FROM toras WHERE sync_status = 'pending' LIMIT 100").all();
+        if (torasPendentes.length > 0) {
+            console.log(`📡 [SYNC] Sincronizando ${torasPendentes.length} toras com a Nuvem...`);
+            const payload = torasPendentes.map(t => ({
+                id: t.id,
+                codigo: t.codigo,
+                especie_id: t.especie_id,
+                lote_id: t.lote_id,
+                rodo: t.rodo,
+                comprimento: t.comprimento,
+                desconto_1: t.desconto_1,
+                desconto_2: t.desconto_2,
+                total_desconto: t.total_desconto,
+                volume: t.volume,
+                status: t.status,
+                data_entrada: t.data_entrada,
+                data_saida: t.data_saida,
+                volume_bruto: t.volume_bruto,
+                rodo_bruto: t.rodo_bruto,
+                comprimento_bruto: t.comprimento_bruto,
+                romaneio_id: t.romaneio_id
+            }));
+            const { error } = await supabase.from('toras').upsert(payload);
+            if (!error) {
+                const stmt = db.prepare("UPDATE toras SET sync_status = 'synced' WHERE id = ?");
+                torasPendentes.forEach(t => stmt.run(t.id));
+            } else {
+                throw new Error("Erro Toras: " + error.message);
+            }
+        }
+    } catch (err) {
+        console.warn("⚠️ [SYNC] Falha ao sincronizar dados com a Nuvem:", err.message);
+    }
+}
+
+function iniciarSincronizacaoNuvem() {
+    // Sincroniza imediatamente após a inicialização e a cada 5 minutos
+    setTimeout(sincronizarDadosPendentes, 5000);
+    setInterval(sincronizarDadosPendentes, 300000);
+}
+
 app.whenReady().then(async () => {
     machineId = machineIdSync();
     console.log("=========================================");
@@ -399,6 +610,7 @@ app.whenReady().then(async () => {
     await verificarLicencaLocal();
     createWindow();
     verificarBackupAgendado();
+    iniciarSincronizacaoNuvem();
 });
 
 // --- HELPERS DE SISTEMA ---
@@ -408,9 +620,15 @@ function obterDataLocal() {
     return (new Date(agora - offset)).toISOString().slice(0, 19).replace('T', ' ');
 }
 
-// Auxiliar para gerar hash de senha (segurança offline)
-function hashPassword(password) {
+// Auxiliar para gerar hash de senha legado (segurança offline)
+function hashPasswordLegacy(password) {
     return crypto.createHash('sha256').update(password + MEU_SEGREDO).digest('hex');
+}
+
+// Novo auxiliar PBKDF2 com salt dinâmico (criptografia forte)
+function hashPasswordPbkdf2(password, salt) {
+    const derivedKey = crypto.pbkdf2Sync(password, salt, 100000, 64, 'sha512');
+    return derivedKey.toString('hex');
 }
 
 
@@ -466,18 +684,18 @@ protectedHandle('get-lotes', async () => db.prepare("SELECT * FROM lotes ORDER B
 protectedHandle('listar-lotes', async () => {
     return db.prepare(`
         SELECT l.*, COUNT(t.id) as total_toras, IFNULL(SUM(t.volume), 0) as volume_total
-        FROM lotes l LEFT JOIN toras t ON l.id = t.lote_id
+        FROM lotes l LEFT JOIN toras t ON l.id = t.lote_id AND t.status = 'pátio'
         GROUP BY l.id ORDER BY l.numero DESC
     `).all();
 });
 protectedHandle('salvar-lote', async (e, d) => {
-    const res = db.prepare('INSERT INTO lotes (numero, descricao) VALUES (?, ?)').run(d.numero, d.descricao);
+    const res = db.prepare('INSERT INTO lotes (numero, descricao, sync_status, updated_at) VALUES (?, ?, \'pending\', CURRENT_TIMESTAMP)').run(d.numero, d.descricao);
     registrarLog('Operador', 'Cadastro', `Lote Nome: ${d.numero} criado.`);
     return { success: true, id: res.lastInsertRowid };
 });
 protectedHandle('editar-lote', async (e, data) => {
     try {
-        const res = db.prepare('UPDATE lotes SET numero = ?, descricao = ? WHERE id = ?').run(data.numero, data.descricao, data.id);
+        const res = db.prepare('UPDATE lotes SET numero = ?, descricao = ?, sync_status = \'pending\', updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(data.numero, data.descricao, data.id);
         // LOG ADICIONADO
         registrarLog('Operador', 'Edição', `Lote Nome: ${data.numero} atualizado.`);
         return { success: true, changes: res.changes };
@@ -499,6 +717,122 @@ protectedHandle('excluir-lote', async (e, id) => {
     return { success: true };
 });
 
+// --- HANDLERS: FORNECEDORES ---
+protectedHandle('listar-fornecedores', async () => {
+    try {
+        return db.prepare("SELECT * FROM fornecedores ORDER BY nome ASC").all();
+    } catch (err) {
+        console.error("Erro ao listar fornecedores:", err);
+        return [];
+    }
+});
+
+protectedHandle('salvar-fornecedor', async (event, data) => {
+    try {
+        if (data.id) {
+            db.prepare("UPDATE fornecedores SET nome = ? WHERE id = ?").run(data.nome, data.id);
+            registrarLog('Operador', 'Edição Fornecedor', `Fornecedor ID ${data.id}: ${data.nome} atualizado.`);
+            return { success: true, id: data.id };
+        } else {
+            const res = db.prepare("INSERT INTO fornecedores (nome) VALUES (?)").run(data.nome);
+            registrarLog('Operador', 'Cadastro Fornecedor', `Fornecedor ${data.nome} cadastrado.`);
+            return { success: true, id: res.lastInsertRowid };
+        }
+    } catch (err) {
+        console.error("Erro ao salvar fornecedor:", err);
+        return { success: false, error: err.message };
+    }
+});
+
+protectedHandle('excluir-fornecedor', async (event, id) => {
+    try {
+        const check = db.prepare('SELECT COUNT(*) as count FROM romaneios WHERE fornecedor_id = ?').get(id);
+        if (check.count > 0) {
+            return { success: false, error: `Não é possível excluir: o fornecedor está vinculado a ${check.count} romaneios.` };
+        }
+        const forn = db.prepare('SELECT nome FROM fornecedores WHERE id = ?').get(id);
+        db.prepare('DELETE FROM fornecedores WHERE id = ?').run(id);
+        registrarLog('Operador', 'Exclusão Fornecedor', `Fornecedor ${forn ? forn.nome : id} removido.`);
+        return { success: true };
+    } catch (err) {
+        console.error("Erro ao excluir fornecedor:", err);
+        return { success: false, error: err.message };
+    }
+});
+
+// --- HANDLERS: MOTORISTAS ---
+protectedHandle('listar-motoristas', async () => {
+    try {
+        return db.prepare("SELECT * FROM motoristas ORDER BY nome ASC").all();
+    } catch (err) {
+        console.error("Erro ao listar motoristas:", err);
+        return [];
+    }
+});
+
+protectedHandle('salvar-motorista', async (event, data) => {
+    try {
+        if (data.id) {
+            db.prepare(`
+                UPDATE motoristas SET 
+                    nome = ?, 
+                    cpf = ?, 
+                    cnh = ?, 
+                    placa_veiculo = ?, 
+                    telefone = ?, 
+                    comissao = ?, 
+                    salario = ? 
+                WHERE id = ?
+            `).run(
+                data.nome,
+                data.cpf || null,
+                data.cnh || null,
+                data.placa_veiculo || null,
+                data.telefone || null,
+                data.comissao || 0,
+                data.salario || 0,
+                data.id
+            );
+            registrarLog('Operador', 'Edição Motorista', `Motorista ID ${data.id}: ${data.nome} atualizado.`);
+            return { success: true, id: data.id };
+        } else {
+            const res = db.prepare(`
+                INSERT INTO motoristas (nome, cpf, cnh, placa_veiculo, telefone, comissao, salario) 
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            `).run(
+                data.nome,
+                data.cpf || null,
+                data.cnh || null,
+                data.placa_veiculo || null,
+                data.telefone || null,
+                data.comissao || 0,
+                data.salario || 0
+            );
+            registrarLog('Operador', 'Cadastro Motorista', `Motorista ${data.nome} cadastrado.`);
+            return { success: true, id: res.lastInsertRowid };
+        }
+    } catch (err) {
+        console.error("Erro ao salvar motorista:", err);
+        return { success: false, error: err.message };
+    }
+});
+
+protectedHandle('excluir-motorista', async (event, id) => {
+    try {
+        const check = db.prepare('SELECT COUNT(*) as count FROM romaneios WHERE motorista_id = ?').get(id);
+        if (check.count > 0) {
+            return { success: false, error: `Não é possível excluir: o motorista está vinculado a ${check.count} romaneios.` };
+        }
+        const mot = db.prepare('SELECT nome FROM motoristas WHERE id = ?').get(id);
+        db.prepare('DELETE FROM motoristas WHERE id = ?').run(id);
+        registrarLog('Operador', 'Exclusão Motorista', `Motorista ${mot ? mot.nome : id} removido.`);
+        return { success: true };
+    } catch (err) {
+        console.error("Erro ao excluir motorista:", err);
+        return { success: false, error: err.message };
+    }
+});
+
 // --- HANDLERS: TORAS E ESTOQUE (MODULO NÚMERO) ---
 protectedHandle('salvar-tora', async (event, tora) => {
     try {
@@ -507,30 +841,41 @@ protectedHandle('salvar-tora', async (event, tora) => {
                 codigo, 
                 especie_id, 
                 lote_id, 
+                romaneio_id,
                 rodo, 
                 desconto_1, 
                 desconto_2, 
                 total_desconto, 
                 comprimento, 
                 volume, 
-                status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pátio')
+                volume_bruto,
+                rodo_bruto,
+                comprimento_bruto,
+                status,
+                sync_status,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pátio', 'pending', CURRENT_TIMESTAMP)
         `);
 
         const result = stmt.run(
             tora.codigo,
             tora.especie_id,
             tora.lote_id,
+            tora.romaneio_id || null,
             tora.rodo,
             tora.desconto_1,
             tora.desconto_2,
             tora.total_desconto,
             tora.comprimento,
-            tora.volume
+            tora.volume,
+            tora.volume_bruto || 0,
+            tora.rodo_bruto || 0,
+            tora.comprimento_bruto || 0
         );
 
         // Registro de Log padronizado [cite: 2026-01-20]
-        registrarLog('Sistema', 'Entrada', `O Número ${tora.codigo} adicionado ao estoque.`);
+        const logRomaneio = tora.romaneio_id ? ` (Romaneio ID: ${tora.romaneio_id})` : '';
+        registrarLog('Sistema', 'Entrada', `O Número ${tora.codigo} adicionado ao estoque${logRomaneio}.`);
 
         return { success: true, id: result.lastInsertRowid };
     } catch (err) {
@@ -575,12 +920,18 @@ protectedHandle('editar-tora', async (event, tora) => {
                 codigo = ?, 
                 especie_id = ?, 
                 lote_id = ?, 
+                romaneio_id = ?,
                 rodo = ?, 
                 desconto_1 = ?, 
                 desconto_2 = ?, 
                 total_desconto = ?, 
                 comprimento = ?, 
-                volume = ?
+                volume = ?,
+                volume_bruto = ?,
+                rodo_bruto = ?,
+                comprimento_bruto = ?,
+                sync_status = 'pending',
+                updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
         `);
 
@@ -588,12 +939,16 @@ protectedHandle('editar-tora', async (event, tora) => {
             tora.codigo,
             tora.especie_id,
             tora.lote_id,
+            tora.romaneio_id || null,
             tora.rodo,
             tora.desconto_1,
             tora.desconto_2,
             tora.total_desconto,
             tora.comprimento,
             tora.volume,
+            tora.volume_bruto || 0,
+            tora.rodo_bruto || 0,
+            tora.comprimento_bruto || 0,
             tora.id
         );
 
@@ -639,6 +994,12 @@ protectedHandle('get-totais-estoque', async (event, filtros) => {
             params.push(filtros.loteId);
         }
 
+        // Filtro de Espécie
+        if (filtros.especieId && filtros.especieId !== 'todos' && filtros.especieId !== 'todas') {
+            sql += " AND especie_id = ?";
+            params.push(filtros.especieId);
+        }
+
         // Filtro de Número [cite: 2026-01-17]
         if (filtros.codigo) {
             sql += " AND (codigo = ? OR CAST(codigo AS INTEGER) = CAST(? AS INTEGER))";
@@ -682,6 +1043,12 @@ protectedHandle('get-estoque-detalhado', async (event, filtros) => {
         if (filtros.loteId && filtros.loteId !== 'todos') {
             sql += " AND lote_id = ?"; // ou t.lote_id dependendo do seu JOIN
             params.push(filtros.loteId);
+        }
+
+        // Filtro por Espécie
+        if (filtros.especieId && filtros.especieId !== 'todos' && filtros.especieId !== 'todas') {
+            sql += " AND t.especie_id = ?";
+            params.push(filtros.especieId);
         }
 
         // 4. CORREÇÃO: Filtro por Número [cite: 2026-01-17]
@@ -770,7 +1137,7 @@ protectedHandle('estornar-baixa-tora', async (event, idTora, numeroTora) => {
     try {
         const stmt = db.prepare(`
             UPDATE toras 
-            SET status = 'pátio', data_saida = NULL 
+            SET status = 'pátio', data_saida = NULL, sync_status = 'pending', updated_at = CURRENT_TIMESTAMP 
             WHERE id = ?
         `);
 
@@ -810,7 +1177,7 @@ protectedHandle('reverter-status-tora', async (event, id, codigo) => {
             // 1. Atualiza o status do Número no estoque
             const stmt = db.prepare(`
                 UPDATE toras 
-                SET status = 'pátio', data_saida = NULL 
+                SET status = 'pátio', data_saida = NULL, sync_status = 'pending', updated_at = CURRENT_TIMESTAMP 
                 WHERE id = ?
             `);
             const info = stmt.run(id);
@@ -847,7 +1214,7 @@ protectedHandle('processar-baixa-lote', async (event, { ids, dataSaida }) => {
         const listaNumeros = torasSelecionadas.map(t => t.codigo).join(', ');
 
         // 2. Executa a atualização no banco de dados
-        const update = db.prepare("UPDATE toras SET status = 'serrada', data_saida = ? WHERE id = ? AND status != 'serrada'");
+        const update = db.prepare("UPDATE toras SET status = 'serrada', data_saida = ?, sync_status = 'pending', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status != 'serrada'");
         const executarTransacao = db.transaction((idsList, dt) => {
             for (const id of idsList) {
                 update.run(dt, id);
@@ -863,6 +1230,279 @@ protectedHandle('processar-baixa-lote', async (event, { ids, dataSaida }) => {
     } catch (err) {
         console.error("Erro ao processar baixa:", err);
         throw err;
+    }
+});
+
+// --- HANDLERS: ROMANEIOS DE ENTRADA ---
+
+protectedHandle('get-proximo-numero-romaneio', async () => {
+    try {
+        const ano = new Date().getFullYear();
+        // Busca todos os números do ano atual para calcular o próximo
+        const existentes = db.prepare(
+            `SELECT numero FROM romaneios WHERE numero LIKE ?`
+        ).all(`ROM-%/${ano}`);
+
+        // Extrai os números sequenciais e acha o maior
+        let maxSeq = 0;
+        existentes.forEach(r => {
+            const match = r.numero.match(/^ROM-(\d+)\//);
+            if (match) {
+                const seq = parseInt(match[1], 10);
+                if (seq > maxSeq) maxSeq = seq;
+            }
+        });
+
+        const proximo = (maxSeq + 1).toString().padStart(3, '0');
+        return { success: true, numero: `ROM-${proximo}/${ano}` };
+    } catch (err) {
+        return { success: false, error: err.message };
+    }
+});
+
+protectedHandle('listar-romaneios', async () => {
+
+    try {
+        return db.prepare(`
+            SELECT r.*,
+                f.nome as fornecedor_nome,
+                m.nome as motorista_nome,
+                COUNT(t.id) as total_toras,
+                IFNULL(SUM(t.volume), 0) as volume_total_liquido,
+                IFNULL(SUM(t.volume_bruto), 0) as volume_total_bruto
+            FROM romaneios r
+            LEFT JOIN toras t ON t.romaneio_id = r.id
+            LEFT JOIN fornecedores f ON r.fornecedor_id = f.id
+            LEFT JOIN motoristas m ON r.motorista_id = m.id
+            GROUP BY r.id
+            ORDER BY r.data DESC, r.id DESC
+        `).all();
+    } catch (err) {
+        console.error('Erro ao listar romaneios:', err);
+        return [];
+    }
+});
+
+protectedHandle('salvar-romaneio', async (event, dados) => {
+    const execute = db.transaction((dados) => {
+        const res = db.prepare(
+            'INSERT INTO romaneios (numero, data, fornecedor, motorista, observacoes, fornecedor_id, motorista_id, frete_valor, frete_total, sync_status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, \'pending\', CURRENT_TIMESTAMP)'
+        ).run(dados.numero, dados.data, dados.fornecedor || null, dados.motorista || null, dados.observacoes || null, dados.fornecedor_id || null, dados.motorista_id || null, dados.frete_valor || 0, dados.frete_total || 0);
+        const romaneioId = res.lastInsertRowid;
+
+        if (dados.toras && Array.isArray(dados.toras)) {
+            const stmtTora = db.prepare(`
+                INSERT INTO toras (
+                    codigo, especie_id, lote_id, romaneio_id, rodo,
+                    desconto_1, desconto_2, total_desconto, comprimento, volume,
+                    volume_bruto, rodo_bruto, comprimento_bruto, status,
+                    sync_status, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pátio', 'pending', CURRENT_TIMESTAMP)
+            `);
+
+            for (const tora of dados.toras) {
+                const exists = db.prepare('SELECT COUNT(*) as count FROM toras WHERE codigo = ?').get(tora.codigo);
+                if (exists.count > 0) {
+                    throw new Error(`O Número de tora ${tora.codigo} já está cadastrado no sistema.`);
+                }
+
+                stmtTora.run(
+                    tora.codigo,
+                    tora.especie_id,
+                    tora.lote_id,
+                    romaneioId,
+                    tora.rodo,
+                    tora.desconto_1,
+                    tora.desconto_2,
+                    tora.total_desconto,
+                    tora.comprimento,
+                    tora.volume,
+                    tora.volume_bruto || 0,
+                    tora.rodo_bruto || 0,
+                    tora.comprimento_bruto || 0
+                );
+
+                registrarLog('Sistema', 'Entrada', `O Número ${tora.codigo} adicionado ao estoque (via Romaneio ${dados.numero}).`);
+            }
+        }
+
+        registrarLog('Operador', 'ROMANEIO', `Romaneio ${dados.numero} criado com ${dados.toras ? dados.toras.length : 0} toras. Data: ${dados.data}.`);
+        return { success: true, id: romaneioId };
+    });
+
+    try {
+        return execute(dados);
+    } catch (err) {
+        console.error('Erro ao salvar romaneio:', err);
+        if (err.message.includes('UNIQUE constraint failed')) {
+            if (err.message.includes('romaneios.numero')) {
+                return { success: false, error: 'Já existe um romaneio com este número.' };
+            }
+            if (err.message.includes('toras.codigo')) {
+                return { success: false, error: 'Um dos números de tora inseridos já está cadastrado no sistema.' };
+            }
+            return { success: false, error: 'Já existe um registro com este número no sistema.' };
+        }
+        return { success: false, error: err.message };
+    }
+});
+
+protectedHandle('editar-romaneio', async (event, dados) => {
+    const execute = db.transaction((dados) => {
+        const res = db.prepare(
+            'UPDATE romaneios SET numero = ?, data = ?, fornecedor = ?, motorista = ?, observacoes = ?, fornecedor_id = ?, motorista_id = ?, frete_valor = ?, frete_total = ?, sync_status = \'pending\', updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+        ).run(dados.numero, dados.data, dados.fornecedor || null, dados.motorista || null, dados.observacoes || null, dados.fornecedor_id || null, dados.motorista_id || null, dados.frete_valor || 0, dados.frete_total || 0, dados.id);
+
+        const romaneioId = dados.id;
+
+        if (dados.torasDeletadas && Array.isArray(dados.torasDeletadas)) {
+            const stmtDelete = db.prepare('DELETE FROM toras WHERE id = ?');
+            for (const toraDel of dados.torasDeletadas) {
+                const t = db.prepare('SELECT codigo, status FROM toras WHERE id = ?').get(toraDel.id);
+                if (t) {
+                    if (t.status === 'serrada') {
+                        throw new Error(`A Tora Número ${t.codigo} já foi serrada e não pode ser removida.`);
+                    }
+                    stmtDelete.run(toraDel.id);
+                    registrarLog('Operador', 'exclusao', `Removeu a Tora Número ${t.codigo} do romaneio ${dados.numero}.`);
+                }
+            }
+        }
+
+        if (dados.toras && Array.isArray(dados.toras)) {
+            const stmtInsert = db.prepare(`
+                INSERT INTO toras (
+                    codigo, especie_id, lote_id, romaneio_id, rodo,
+                    desconto_1, desconto_2, total_desconto, comprimento, volume,
+                    volume_bruto, rodo_bruto, comprimento_bruto, status,
+                    sync_status, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pátio', 'pending', CURRENT_TIMESTAMP)
+            `);
+
+            const stmtUpdate = db.prepare(`
+                UPDATE toras SET
+                    codigo = ?, especie_id = ?, lote_id = ?, romaneio_id = ?, rodo = ?,
+                    desconto_1 = ?, desconto_2 = ?, total_desconto = ?, comprimento = ?, volume = ?,
+                    volume_bruto = ?, rodo_bruto = ?, comprimento_bruto = ?,
+                    sync_status = 'pending', updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            `);
+
+            for (const tora of dados.toras) {
+                if (tora.id) {
+                    stmtUpdate.run(
+                        tora.codigo,
+                        tora.especie_id,
+                        tora.lote_id,
+                        romaneioId,
+                        tora.rodo,
+                        tora.desconto_1,
+                        tora.desconto_2,
+                        tora.total_desconto,
+                        tora.comprimento,
+                        tora.volume,
+                        tora.volume_bruto || 0,
+                        tora.rodo_bruto || 0,
+                        tora.comprimento_bruto || 0,
+                        tora.id
+                    );
+                } else {
+                    const exists = db.prepare('SELECT COUNT(*) as count FROM toras WHERE codigo = ?').get(tora.codigo);
+                    if (exists.count > 0) {
+                        throw new Error(`O Número de tora ${tora.codigo} já está cadastrado no sistema.`);
+                    }
+
+                    stmtInsert.run(
+                        tora.codigo,
+                        tora.especie_id,
+                        tora.lote_id,
+                        romaneioId,
+                        tora.rodo,
+                        tora.desconto_1,
+                        tora.desconto_2,
+                        tora.total_desconto,
+                        tora.comprimento,
+                        tora.volume,
+                        tora.volume_bruto || 0,
+                        tora.rodo_bruto || 0,
+                        tora.comprimento_bruto || 0
+                    );
+
+                    registrarLog('Sistema', 'Entrada', `O Número ${tora.codigo} adicionado ao estoque (via Romaneio ${dados.numero}).`);
+                }
+            }
+        }
+
+        registrarLog('Operador', 'ROMANEIO', `Romaneio ${dados.numero} editado e toras sincronizadas.`);
+        return { success: true, changes: res.changes };
+    });
+
+    try {
+        return execute(dados);
+    } catch (err) {
+        console.error('Erro ao editar romaneio:', err);
+        if (err.message.includes('UNIQUE constraint failed')) {
+            if (err.message.includes('romaneios.numero')) {
+                return { success: false, error: 'Já existe um romaneio com este número.' };
+            }
+            if (err.message.includes('toras.codigo')) {
+                return { success: false, error: 'Um dos números de tora inseridos já está cadastrado no sistema.' };
+            }
+            return { success: false, error: 'Já existe um registro com este número no sistema.' };
+        }
+        return { success: false, error: err.message };
+    }
+});
+
+protectedHandle('excluir-romaneio', async (event, id) => {
+    try {
+        const check = db.prepare('SELECT COUNT(*) as count FROM toras WHERE romaneio_id = ?').get(id);
+        if (check.count > 0) {
+            return { success: false, error: `Não é possível excluir: o romaneio contém ${check.count} toras vinculadas.` };
+        }
+        const rom = db.prepare('SELECT numero FROM romaneios WHERE id = ?').get(id);
+        db.prepare('DELETE FROM romaneios WHERE id = ?').run(id);
+        registrarLog('Operador', 'ROMANEIO', `Romaneio ${rom ? rom.numero : id} excluído.`);
+        return { success: true };
+    } catch (err) {
+        return { success: false, error: err.message };
+    }
+});
+
+protectedHandle('get-romaneio-detalhado', async (event, romaneioId) => {
+    try {
+        const queryRom = `
+            SELECT r.*, 
+                   f.nome as fornecedor_nome, 
+                   m.nome as motorista_nome
+            FROM romaneios r
+            LEFT JOIN fornecedores f ON r.fornecedor_id = f.id
+            LEFT JOIN motoristas m ON r.motorista_id = m.id
+            WHERE r.id = ?
+        `;
+        const romaneio = db.prepare(queryRom).get(romaneioId);
+        if (!romaneio) return { success: false, error: 'Romaneio não encontrado.' };
+
+        const toras = db.prepare(`
+            SELECT t.*, e.nome as especie_nome, l.numero as lote_numero
+            FROM toras t
+            LEFT JOIN especies e ON t.especie_id = e.id
+            LEFT JOIN lotes l ON t.lote_id = l.id
+            WHERE t.romaneio_id = ?
+            ORDER BY CAST(t.codigo AS INTEGER) ASC
+        `).all(romaneioId);
+
+        return { success: true, romaneio, toras };
+    } catch (err) {
+        return { success: false, error: err.message };
+    }
+});
+
+protectedHandle('get-romaneios-select', async () => {
+    try {
+        return db.prepare('SELECT id, numero, data FROM romaneios ORDER BY data DESC, id DESC').all();
+    } catch (err) {
+        return [];
     }
 });
 
@@ -1036,6 +1676,94 @@ protectedHandle('buscar-dados-relatorio-paginado', async (event, filtros) => {
     }
 });
 
+protectedHandle('relatorio-entradas-fornecedor', async (event, filtros) => {
+    try {
+        let sql = `
+            SELECT r.id, r.numero, r.data, r.frete_total,
+                   f.nome as fornecedor_nome,
+                   COUNT(t.id) as total_toras,
+                   IFNULL(SUM(t.volume), 0) as vol_liquido,
+                   IFNULL(SUM(t.volume_bruto), 0) as vol_bruto
+            FROM romaneios r
+            LEFT JOIN fornecedores f ON r.fornecedor_id = f.id
+            LEFT JOIN toras t ON t.romaneio_id = r.id
+            WHERE 1=1
+        `;
+        const params = [];
+        if (filtros.fornecedorId && filtros.fornecedorId !== 'todos') {
+            sql += " AND r.fornecedor_id = ?";
+            params.push(filtros.fornecedorId);
+        }
+        if (filtros.dataInicio && filtros.dataFim) {
+            sql += " AND r.data BETWEEN ? AND ?";
+            params.push(filtros.dataInicio, filtros.dataFim);
+        }
+        if (filtros.romaneioInicio) {
+            const valInicio = parseRomaneioParaOrdenacao(filtros.romaneioInicio);
+            if (valInicio !== null) {
+                sql += " AND (CAST(SUBSTR(r.numero, -4) AS INTEGER) * 100000 + CAST(SUBSTR(REPLACE(r.numero, 'ROM-', ''), 1, INSTR(REPLACE(r.numero, 'ROM-', ''), '/') - 1) AS INTEGER)) >= ?";
+                params.push(valInicio);
+            }
+        }
+        if (filtros.romaneioFim) {
+            const valFim = parseRomaneioParaOrdenacao(filtros.romaneioFim);
+            if (valFim !== null) {
+                sql += " AND (CAST(SUBSTR(r.numero, -4) AS INTEGER) * 100000 + CAST(SUBSTR(REPLACE(r.numero, 'ROM-', ''), 1, INSTR(REPLACE(r.numero, 'ROM-', ''), '/') - 1) AS INTEGER)) <= ?";
+                params.push(valFim);
+            }
+        }
+        sql += " GROUP BY r.id ORDER BY r.data DESC, r.id DESC";
+        return db.prepare(sql).all(...params);
+    } catch (err) {
+        console.error("Erro relatorio-entradas-fornecedor:", err);
+        return [];
+    }
+});
+
+protectedHandle('relatorio-cargas-motorista', async (event, filtros) => {
+    try {
+        let sql = `
+            SELECT r.id, r.numero, r.data, r.frete_total, r.frete_valor,
+                   m.nome as motorista_nome, IFNULL(m.comissao, 0) as comissao,
+                   COUNT(t.id) as total_toras,
+                   IFNULL(SUM(t.volume_bruto), 0) as vol_bruto
+            FROM romaneios r
+            LEFT JOIN motoristas m ON r.motorista_id = m.id
+            LEFT JOIN toras t ON t.romaneio_id = r.id
+            WHERE 1=1
+        `;
+        const params = [];
+        if (filtros.motoristaId && filtros.motoristaId !== 'todos') {
+            sql += " AND r.motorista_id = ?";
+            params.push(filtros.motoristaId);
+        }
+        if (filtros.dataInicio && filtros.dataFim) {
+            sql += " AND r.data BETWEEN ? AND ?";
+            params.push(filtros.dataInicio, filtros.dataFim);
+        }
+        if (filtros.romaneioInicio) {
+            const valInicio = parseRomaneioParaOrdenacao(filtros.romaneioInicio);
+            if (valInicio !== null) {
+                sql += " AND (CAST(SUBSTR(r.numero, -4) AS INTEGER) * 100000 + CAST(SUBSTR(REPLACE(r.numero, 'ROM-', ''), 1, INSTR(REPLACE(r.numero, 'ROM-', ''), '/') - 1) AS INTEGER)) >= ?";
+                params.push(valInicio);
+            }
+        }
+        if (filtros.romaneioFim) {
+            const valFim = parseRomaneioParaOrdenacao(filtros.romaneioFim);
+            if (valFim !== null) {
+                sql += " AND (CAST(SUBSTR(r.numero, -4) AS INTEGER) * 100000 + CAST(SUBSTR(REPLACE(r.numero, 'ROM-', ''), 1, INSTR(REPLACE(r.numero, 'ROM-', ''), '/') - 1) AS INTEGER)) <= ?";
+                params.push(valFim);
+            }
+        }
+        sql += " GROUP BY r.id ORDER BY r.data DESC, r.id DESC";
+        return db.prepare(sql).all(...params);
+    } catch (err) {
+        console.error("Erro relatorio-cargas-motorista:", err);
+        return [];
+    }
+});
+
+
 protectedHandle('listar-logs', async (event, filtros = {}) => {
     try {
         const { acao, dataInicio, dataFim, limiteInicial } = filtros;
@@ -1091,6 +1819,48 @@ protectedHandle('get-dashboard-data', () => {
                                   JOIN lotes l ON t.lote_id = l.id WHERE t.status = 'pátio' GROUP BY l.numero ORDER BY volumeTotal DESC LIMIT 4`).all();
         const ranking = db.prepare(`SELECT e.nome as especie, SUM(t.volume) as volumeTotal FROM toras t JOIN especies e ON t.especie_id = e.id
                                      WHERE t.status = 'pátio' GROUP BY e.id ORDER BY volumeTotal DESC LIMIT 5`).all();
+        
+        // Histórico de movimentação dos últimos 6 meses (Entradas e Saídas)
+        const historicoEntradas = db.prepare(`
+            SELECT strftime('%Y-%m', data_entrada) as mes, SUM(volume) as vol 
+            FROM toras 
+            WHERE data_entrada >= date('now', '-6 month')
+            GROUP BY mes 
+            ORDER BY mes ASC
+        `).all();
+
+        const historicoSaidas = db.prepare(`
+            SELECT strftime('%Y-%m', data_saida) as mes, SUM(volume) as vol 
+            FROM toras 
+            WHERE status = 'serrada' AND data_saida >= date('now', '-6 month')
+            GROUP BY mes 
+            ORDER BY mes ASC
+        `).all();
+
+        const meses = [];
+        for (let i = 5; i >= 0; i--) {
+            const d = new Date();
+            d.setMonth(d.getMonth() - i);
+            const mesFormatado = d.toISOString().substring(0, 7); // "YYYY-MM"
+            meses.push(mesFormatado);
+        }
+
+        const historicoMovimentacao = meses.map(m => {
+            const ent = historicoEntradas.find(e => e.mes === m);
+            const sai = historicoSaidas.find(s => s.mes === m);
+            
+            const partes = m.split('-');
+            const dataObjeto = new Date(parseInt(partes[0]), parseInt(partes[1]) - 1, 1);
+            const labelMes = dataObjeto.toLocaleString('pt-BR', { month: 'short' }).replace('.', '');
+            
+            return {
+                mes: m,
+                label: labelMes.charAt(0).toUpperCase() + labelMes.slice(1),
+                entradas: ent ? (ent.vol || 0) : 0,
+                saidas: sai ? (sai.vol || 0) : 0
+            };
+        });
+
         return {
             totalPecas: estoque.totalPecas || 0,
             totalVolume: estoque.totalVolume || 0,
@@ -1098,7 +1868,8 @@ protectedHandle('get-dashboard-data', () => {
             ultimasToras: ultimas,
             resumoLotes: lotes,
             rankingEspecies: ranking,
-            logsRecentes: db.prepare(`SELECT data_hora, descricao FROM logs ORDER BY id DESC LIMIT 3`).all()
+            logsRecentes: db.prepare(`SELECT data_hora, descricao FROM logs ORDER BY id DESC LIMIT 3`).all(),
+            historicoMovimentacao
         };
     } catch (err) { return null; }
 });
@@ -1254,6 +2025,33 @@ protectedHandle('limpar-banco-dados', async () => {
     return { success: true };
 });
 
+protectedHandle('get-sync-status', async () => {
+    try {
+        const torasCount = db.prepare("SELECT COUNT(*) as count FROM toras WHERE sync_status = 'pending'").get().count;
+        const lotesCount = db.prepare("SELECT COUNT(*) as count FROM lotes WHERE sync_status = 'pending'").get().count;
+        const romaneiosCount = db.prepare("SELECT COUNT(*) as count FROM romaneios WHERE sync_status = 'pending'").get().count;
+        
+        return {
+            success: true,
+            pending: torasCount + lotesCount + romaneiosCount,
+            toras: torasCount,
+            lotes: lotesCount,
+            romaneios: romaneiosCount
+        };
+    } catch (e) {
+        return { success: false, pending: 0, error: e.message };
+    }
+});
+
+protectedHandle('sincronizar-nuvem-manual', async () => {
+    try {
+        await sincronizarDadosPendentes();
+        return { success: true };
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+
 // --- NOVOS HANDLERS: CONFIGURAÇÕES E BACKUP AGENDADO ---
 protectedHandle('get-backup-config', async () => carregarConfigBackup());
 
@@ -1317,8 +2115,9 @@ protectedHandle('supabase-login', async (event, { email, password }) => {
 
         if (!error) {
             // SUCESSO ONLINE: Atualiza o cache de credenciais local
-            const hash = hashPassword(password);
-            db.prepare(`INSERT OR REPLACE INTO usuarios (email, password_hash, last_login) VALUES (?, ?, CURRENT_TIMESTAMP)`).run(email, hash);
+            const salt = crypto.randomBytes(16).toString('hex');
+            const hash = hashPasswordPbkdf2(password, salt);
+            db.prepare(`INSERT OR REPLACE INTO usuarios (email, password_hash, password_salt, last_login) VALUES (?, ?, ?, CURRENT_TIMESTAMP)`).run(email, hash, salt);
 
             // --- SINCRONIZAÇÃO DE ASSINATURA (OPCIONAL/SAAS) ---
             try {
@@ -1371,10 +2170,27 @@ protectedHandle('supabase-login', async (event, { email, password }) => {
             const userLocal = db.prepare(`SELECT * FROM usuarios WHERE email = ?`).get(email);
 
             if (userLocal) {
-                const hashDigitado = hashPassword(password);
-                if (hashDigitado === userLocal.password_hash) {
+                let match = false;
+                
+                // MIGRACAO / COMPATIBILIDADE: Se não possuir salt, usa hash legado e atualiza
+                if (!userLocal.password_salt) {
+                    const hashDigitadoLegacy = hashPasswordLegacy(password);
+                    if (hashDigitadoLegacy === userLocal.password_hash) {
+                        match = true;
+                        // Atualiza no banco local para o novo padrão PBKDF2 com salt dinâmico
+                        const novoSalt = crypto.randomBytes(16).toString('hex');
+                        const novoHash = hashPasswordPbkdf2(password, novoSalt);
+                        db.prepare(`UPDATE usuarios SET password_hash = ?, password_salt = ? WHERE email = ?`).run(novoHash, novoSalt, email);
+                    }
+                } else {
+                    const hashDigitado = hashPasswordPbkdf2(password, userLocal.password_salt);
+                    if (hashDigitado === userLocal.password_hash) {
+                        match = true;
+                    }
+                }
+
+                if (match) {
                     registrarLog(email, 'LOGIN OFFLINE', 'Autenticado via cache local (sem internet).');
-                    // Retorna um objeto de usuário compatível com o que o frontend espera
                     return {
                         success: true,
                         user: { email: userLocal.email, id: 'offline-mode' },
@@ -1418,4 +2234,271 @@ protectedHandle('supabase-get-session', async () => {
     return data.session;
 });
 
+// --- NOVOS HANDLERS: CONTROLE FINANCEIRO DE MOTORISTAS (VALES E FECHAMENTO) ---
+
+protectedHandle('salvar-vale-motorista', async (event, vale) => {
+    try {
+        if (vale.id) {
+            db.prepare(`
+                UPDATE motorista_vales SET
+                    motorista_id = ?, valor = ?, data = ?, descricao = ?, sync_status = 'pending', updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            `).run(vale.motorista_id, vale.valor, vale.data, vale.descricao || null, vale.id);
+            registrarLog('Operador', 'Edição Vale', `Vale ID ${vale.id} editado.`);
+            return { success: true };
+        } else {
+            const res = db.prepare(`
+                INSERT INTO motorista_vales (motorista_id, valor, data, descricao, status, sync_status, updated_at)
+                VALUES (?, ?, ?, ?, 'aberto', 'pending', CURRENT_TIMESTAMP)
+            `).run(vale.motorista_id, vale.valor, vale.data, vale.descricao || null);
+            registrarLog('Operador', 'Cadastro Vale', `Vale no valor de R$ ${vale.valor} lançado.`);
+            return { success: true, id: res.lastInsertRowid };
+        }
+    } catch (err) {
+        console.error("Erro ao salvar vale:", err);
+        return { success: false, error: err.message };
+    }
+});
+
+protectedHandle('excluir-vale-motorista', async (event, id) => {
+    try {
+        const vale = db.prepare("SELECT status FROM motorista_vales WHERE id = ?").get(id);
+        if (vale && vale.status === 'pago') {
+            return { success: false, error: "Não é possível excluir um vale que já foi descontado em um fechamento." };
+        }
+        db.prepare("DELETE FROM motorista_vales WHERE id = ?").run(id);
+        registrarLog('Operador', 'Exclusão Vale', `Vale ID ${id} excluído.`);
+        return { success: true };
+    } catch (err) {
+        console.error("Erro ao excluir vale:", err);
+        return { success: false, error: err.message };
+    }
+});
+
+protectedHandle('listar-vales-motorista', async (event, filtros = {}) => {
+    try {
+        let sql = `
+            SELECT v.*, m.nome as motorista_nome
+            FROM motorista_vales v
+            JOIN motoristas m ON v.motorista_id = m.id
+            WHERE 1=1
+        `;
+        const params = [];
+        if (filtros.motoristaId && filtros.motoristaId !== 'todos') {
+            sql += " AND v.motorista_id = ?";
+            params.push(filtros.motoristaId);
+        }
+        if (filtros.status && filtros.status !== 'todos') {
+            sql += " AND v.status = ?";
+            params.push(filtros.status);
+        }
+        sql += " ORDER BY v.data DESC, v.id DESC";
+        return db.prepare(sql).all(...params);
+    } catch (err) {
+        console.error("Erro ao listar vales:", err);
+        return [];
+    }
+});
+
+protectedHandle('calcular-previa-fechamento', async (event, filtros) => {
+    try {
+        const { motoristaId, dataInicio, dataFim, romaneioInicio, romaneioFim } = filtros;
+        const motorista = db.prepare("SELECT nome, salario, comissao FROM motoristas WHERE id = ?").get(motoristaId);
+        if (!motorista) return { success: false, error: "Motorista não encontrado." };
+
+        // 1. Busca Cargas e calcula comissões
+        let sqlCargas = `
+            SELECT r.id, r.numero, r.data, r.frete_total,
+                   (r.frete_total * (IFNULL(m.comissao, 0) / 100.0)) as valor_comissao,
+                   COUNT(t.id) as total_toras,
+                   IFNULL(SUM(t.volume_bruto), 0) as vol_bruto
+            FROM romaneios r
+            LEFT JOIN motoristas m ON r.motorista_id = m.id
+            LEFT JOIN toras t ON t.romaneio_id = r.id
+            WHERE r.motorista_id = ?
+        `;
+        const paramsCargas = [motoristaId];
+        if (dataInicio && dataFim) {
+            sqlCargas += " AND r.data BETWEEN ? AND ?";
+            paramsCargas.push(dataInicio, dataFim);
+        } else if (romaneioInicio && romaneioFim) {
+            sqlCargas += " AND (CAST(SUBSTR(REPLACE(r.numero, 'ROM-', ''), 1, INSTR(REPLACE(r.numero, 'ROM-', ''), '/') - 1) AS INTEGER)) BETWEEN CAST(? AS INTEGER) AND CAST(? AS INTEGER)";
+            paramsCargas.push(romaneioInicio, romaneioFim);
+        }
+        sqlCargas += " GROUP BY r.id ORDER BY r.data ASC, r.id ASC";
+        
+        const cargas = db.prepare(sqlCargas).all(...paramsCargas);
+        const totalComissao = cargas.reduce((sum, c) => sum + (c.valor_comissao || 0), 0);
+
+        // 2. Busca Vales (Adiantamentos) em aberto para o motorista
+        const vales = db.prepare(`
+            SELECT id, valor, data, descricao 
+            FROM motorista_vales 
+            WHERE motorista_id = ? AND status = 'aberto'
+            ORDER BY data ASC
+        `).all(motoristaId);
+        
+        const totalVales = vales.reduce((sum, v) => sum + v.valor, 0);
+
+        return {
+            success: true,
+            motorista: {
+                nome: motorista.nome,
+                salario: motorista.salario || 0,
+                comissao_pct: motorista.comissao || 0
+            },
+            cargas,
+            totalComissao,
+            vales,
+            totalVales,
+            totalLiquido: (motorista.salario || 0) + totalComissao - totalVales
+        };
+    } catch (err) {
+        console.error("Erro ao calcular prévia de fechamento:", err);
+        return { success: false, error: err.message };
+    }
+});
+
+protectedHandle('salvar-fechamento-motorista', async (event, dados) => {
+    const execute = db.transaction((dados) => {
+        // 1. Salva o registro do Fechamento
+        const res = db.prepare(`
+            INSERT INTO motorista_fechamentos (
+                motorista_id, data_fechamento, periodo_inicio, periodo_fim,
+                romaneio_inicio, romaneio_fim, valor_salario, valor_comissao,
+                valor_vales, valor_liquido, observacoes, sync_status, updated_at
+            ) VALUES (?, CURRENT_DATE, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP)
+        `).run(
+            dados.motorista_id,
+            dados.periodo_inicio,
+            dados.periodo_fim,
+            dados.romaneio_inicio || null,
+            dados.romaneio_fim || null,
+            dados.valor_salario,
+            dados.valor_comissao,
+            dados.valor_vales,
+            dados.valor_liquido,
+            dados.observacoes || null
+        );
+
+        const fechamentoId = res.lastInsertRowid;
+
+        // 2. Vincula os vales selecionados a este fechamento e muda para 'pago'
+        if (dados.valesIds && Array.isArray(dados.valesIds) && dados.valesIds.length > 0) {
+            const stmtVale = db.prepare(`
+                UPDATE motorista_vales 
+                SET status = 'pago', fechamento_id = ?, sync_status = 'pending', updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND status = 'aberto'
+            `);
+            for (const valeId of dados.valesIds) {
+                stmtVale.run(fechamentoId, valeId);
+            }
+        }
+
+        registrarLog('Operador', 'Fechamento Motorista', `Fechamento ID ${fechamentoId} para o Motorista ID ${dados.motorista_id} consolidado.`);
+        return { success: true, id: fechamentoId };
+    });
+
+    try {
+        return execute(dados);
+    } catch (err) {
+        console.error("Erro ao salvar fechamento:", err);
+        return { success: false, error: err.message };
+    }
+});
+
+protectedHandle('listar-fechamentos-motorista', async (event, filtros = {}) => {
+    try {
+        let sql = `
+            SELECT f.*, m.nome as motorista_nome
+            FROM motorista_fechamentos f
+            JOIN motoristas m ON f.motorista_id = m.id
+            WHERE 1=1
+        `;
+        const params = [];
+        if (filtros.motoristaId && filtros.motoristaId !== 'todos') {
+            sql += " AND f.motorista_id = ?";
+            params.push(filtros.motoristaId);
+        }
+        sql += " ORDER BY f.data_fechamento DESC, f.id DESC";
+        return db.prepare(sql).all(...params);
+    } catch (err) {
+        console.error("Erro ao listar fechamentos:", err);
+        return [];
+    }
+});
+
+protectedHandle('excluir-fechamento-motorista', async (event, id) => {
+    const execute = db.transaction((id) => {
+        // 1. Libera os vales vinculados a este fechamento de volta para 'aberto'
+        db.prepare(`
+            UPDATE motorista_vales 
+            SET status = 'aberto', fechamento_id = NULL, sync_status = 'pending', updated_at = CURRENT_TIMESTAMP
+            WHERE fechamento_id = ?
+        `).run(id);
+
+        // 2. Deleta o fechamento
+        db.prepare("DELETE FROM motorista_fechamentos WHERE id = ?").run(id);
+
+        registrarLog('Operador', 'Estorno Fechamento', `Fechamento ID ${id} estornado. Vales voltaram para aberto.`);
+        return { success: true };
+    });
+
+    try {
+        return execute(id);
+    } catch (err) {
+        console.error("Erro ao excluir fechamento:", err);
+        return { success: false, error: err.message };
+    }
+});
+
+protectedHandle('get-fechamento-detalhado', async (event, id) => {
+    try {
+        const fechamento = db.prepare(`
+            SELECT f.*, m.nome as motorista_nome, m.placa_veiculo, m.comissao as motorista_comissao_pct
+            FROM motorista_fechamentos f
+            JOIN motoristas m ON f.motorista_id = m.id
+            WHERE f.id = ?
+        `).get(id);
+
+        if (!fechamento) return { success: false, error: "Fechamento não encontrado." };
+
+        // 1. Busca os romaneios daquele motorista no período
+        let sqlCargas = `
+            SELECT r.id, r.numero, r.data, r.frete_total,
+                   (r.frete_total * (IFNULL(m.comissao, 0) / 100.0)) as valor_comissao,
+                   COUNT(t.id) as total_toras,
+                   IFNULL(SUM(t.volume_bruto), 0) as vol_bruto
+            FROM romaneios r
+            LEFT JOIN motoristas m ON r.motorista_id = m.id
+            LEFT JOIN toras t ON t.romaneio_id = r.id
+            WHERE r.motorista_id = ?
+        `;
+        const paramsCargas = [fechamento.motorista_id];
+        
+        if (fechamento.romaneio_inicio && fechamento.romaneio_fim) {
+            sqlCargas += " AND CAST(r.numero AS INTEGER) BETWEEN CAST(? AS INTEGER) AND CAST(? AS INTEGER)";
+            paramsCargas.push(fechamento.romaneio_inicio, fechamento.romaneio_fim);
+        } else {
+            sqlCargas += " AND r.data BETWEEN ? AND ?";
+            paramsCargas.push(fechamento.periodo_inicio, fechamento.periodo_fim);
+        }
+        sqlCargas += " GROUP BY r.id ORDER BY r.data ASC, r.id ASC";
+        
+        const cargas = db.prepare(sqlCargas).all(...paramsCargas);
+
+        // 2. Busca os vales descontados neste fechamento
+        const vales = db.prepare(`
+            SELECT id, valor, data, descricao 
+            FROM motorista_vales 
+            WHERE fechamento_id = ?
+            ORDER BY data ASC
+        `).all(id);
+
+        return { success: true, fechamento, cargas, vales };
+    } catch (err) {
+        console.error("Erro ao detalhar fechamento:", err);
+        return { success: false, error: err.message };
+    }
+});
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

@@ -1,7 +1,7 @@
 {
   "name": "estoque-toras",
   "version": "1.1.3",
-  "description": "Sistema profissional para gestão de estoque e romaneio de toras",
+  "description": "Sistema profissional para gestão de estoque e romaneio de toras.",
   "author": "Matteus Sousa",
   "main": "entry.js",
   "scripts": {

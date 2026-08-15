@@ -1,0 +1,14 @@
+
+> estoque-toras@1.1.3 start
+> node -e "require('fs').copyFileSync('renderer-dev.js', 'renderer.js')" && electron .
+
+
+◇ injected env (3) from .env // tip: ⌘ override existing { override: true }
+=========================================
+🚀 SISTEMA INICIADO
+💻 MACHINE ID DESTE PC: 35c1d215f038e52b6fa8e5f8448084e6b627aea62b7062518457ebe416ff448b
+=========================================
+21:02:14.340 > Skip checkForUpdates because application is not packed and dev update config is not forced
+21:02:14.345 > checkForUpdatesAndNotify called, downloadPromise is null
+Tentativa de acesso ao canal protegido 'get-dashboard-data' sem ativação.
+Tentativa de acesso ao canal protegido 'listar-lotes' sem ativação.

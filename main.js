@@ -237,24 +237,21 @@ db.exec(`
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
-    CREATE TABLE IF NOT EXISTS toras (
+    CREATE TABLE IF NOT EXISTS fornecedores (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        codigo TEXT UNIQUE,          -- Número da Tora [cite: 2026-01-17]
-        especie_id INTEGER,
-        lote_id INTEGER,
-        rodo INTEGER,                -- Circunferência em cm
-        comprimento REAL,            -- Metros
-        desconto_1 INTEGER DEFAULT 0, -- Oco Medida 1
-        desconto_2 INTEGER DEFAULT 0, -- Oco Medida 2
-        total_desconto REAL,         -- Volume do oco (m3)
-        volume REAL,                 -- Volume Líquido Final (m3)
-        status TEXT DEFAULT 'pátio',
-        data_entrada DATETIME DEFAULT CURRENT_TIMESTAMP,
-        data_saida TEXT,
-        sync_status TEXT DEFAULT 'pending',
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (especie_id) REFERENCES especies(id),
-        FOREIGN KEY (lote_id) REFERENCES lotes(id)
+        nome TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS motoristas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nome TEXT NOT NULL,
+        cpf TEXT,
+        cnh TEXT,
+        placa_veiculo TEXT,
+        telefone TEXT,
+        comissao REAL DEFAULT 0,
+        salario REAL DEFAULT 0,
+        data_criacao DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS logs (
@@ -279,26 +276,40 @@ db.exec(`
         fornecedor TEXT,
         motorista TEXT,
         observacoes TEXT,
+        fornecedor_id INTEGER,
+        motorista_id INTEGER,
+        frete_valor REAL DEFAULT 0,
+        frete_total REAL DEFAULT 0,
         data_criacao DATETIME DEFAULT CURRENT_TIMESTAMP,
         sync_status TEXT DEFAULT 'pending',
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (fornecedor_id) REFERENCES fornecedores(id),
+        FOREIGN KEY (motorista_id) REFERENCES motoristas(id)
     );
 
-    CREATE TABLE IF NOT EXISTS fornecedores (
+    CREATE TABLE IF NOT EXISTS toras (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nome TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS motoristas (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nome TEXT NOT NULL,
-        cpf TEXT,
-        cnh TEXT,
-        placa_veiculo TEXT,
-        telefone TEXT,
-        comissao REAL DEFAULT 0,
-        salario REAL DEFAULT 0,
-        data_criacao DATETIME DEFAULT CURRENT_TIMESTAMP
+        codigo TEXT UNIQUE,          -- Número da Tora [cite: 2026-01-17]
+        especie_id INTEGER,
+        lote_id INTEGER,
+        romaneio_id INTEGER,
+        rodo INTEGER,                -- Circunferência em cm
+        comprimento REAL,            -- Metros
+        desconto_1 INTEGER DEFAULT 0, -- Oco Medida 1
+        desconto_2 INTEGER DEFAULT 0, -- Oco Medida 2
+        total_desconto REAL,         -- Volume do oco (m3)
+        volume REAL,                 -- Volume Líquido Final (m3)
+        volume_bruto REAL DEFAULT 0,
+        rodo_bruto INTEGER DEFAULT 0,
+        comprimento_bruto REAL DEFAULT 0,
+        status TEXT DEFAULT 'pátio',
+        data_entrada DATETIME DEFAULT CURRENT_TIMESTAMP,
+        data_saida TEXT,
+        sync_status TEXT DEFAULT 'pending',
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (especie_id) REFERENCES especies(id),
+        FOREIGN KEY (lote_id) REFERENCES lotes(id),
+        FOREIGN KEY (romaneio_id) REFERENCES romaneios(id)
     );
 
     CREATE TABLE IF NOT EXISTS motorista_fechamentos (
@@ -338,6 +349,7 @@ db.exec(`
     CREATE INDEX IF NOT EXISTS idx_toras_codigo ON toras(codigo);
     CREATE INDEX IF NOT EXISTS idx_toras_status ON toras(status);
     CREATE INDEX IF NOT EXISTS idx_toras_lote ON toras(lote_id);
+    CREATE INDEX IF NOT EXISTS idx_toras_romaneio ON toras(romaneio_id);
     CREATE INDEX IF NOT EXISTS idx_logs_data ON logs(data_hora);
     CREATE INDEX IF NOT EXISTS idx_toras_especie ON toras(especie_id);
     CREATE INDEX IF NOT EXISTS idx_romaneios_fornecedor ON romaneios(fornecedor_id);

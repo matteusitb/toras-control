@@ -45,7 +45,7 @@ function descriptografar(texto) {
 function parseRomaneioParaOrdenacao(valor) {
     if (!valor) return null;
     let s = valor.toString().trim().toUpperCase();
-    
+
     // Tenta casar (ROM-)?(número)/(ano)
     const match = s.match(/^(?:ROM-)?(\d+)\/(\d{4})$/i);
     if (match) {
@@ -53,7 +53,7 @@ function parseRomaneioParaOrdenacao(valor) {
         const ano = parseInt(match[2], 10);
         return ano * 100000 + numSeq;
     }
-    
+
     // Tenta casar apenas um número sequencial (ex: "5" ou "05"), assumindo o ano atual
     const matchSimples = s.match(/^(?:ROM-)?(\d+)$/i);
     if (matchSimples) {
@@ -61,7 +61,7 @@ function parseRomaneioParaOrdenacao(valor) {
         const ano = new Date().getFullYear();
         return ano * 100000 + numSeq;
     }
-    
+
     return null;
 }
 
@@ -89,7 +89,7 @@ async function verificarLicencaLocal() {
         try {
             const conteudoCriptografado = fs.readFileSync(arquivoLicenca, 'utf-8');
             let conteudoJson = descriptografar(conteudoCriptografado);
-            
+
             // MIGRACAO: Se falhou a descriptografia, tenta ler como Base64 (formato antigo)
             if (!conteudoJson) {
                 try {
@@ -106,10 +106,10 @@ async function verificarLicencaLocal() {
                 motivoBloqueio = 'unactivated';
                 return false;
             }
-            
+
             const licenca = JSON.parse(conteudoJson);
             machineId = machineIdSync();
-            
+
             // 1. Verifica ID da Máquina
             if (licenca.mid !== machineId) {
                 console.error("Máquina não autorizada.");
@@ -397,7 +397,7 @@ function createWindow() {
         width: 1280,
         height: 800,
         minWidth: 800,
-        title: `${packageInfo.productName || "Controle de Toras"} - v${packageInfo.version || "1.0.0"}`,
+        title: `${packageInfo.productName || "MT - PRO Estoque de Toras"} - v${packageInfo.version || "1.0.0"}`,
         show: true,
         webPreferences: {
             nodeIntegration: false,
@@ -1098,7 +1098,6 @@ protectedHandle('buscar-tora-por-codigo', async (event, codigo) => {
             LEFT JOIN especies e ON t.especie_id = e.id 
             LEFT JOIN lotes l ON t.lote_id = l.id
             WHERE (t.codigo = ? OR CAST(t.codigo AS INTEGER) = CAST(? AS INTEGER))
-            AND t.status = 'pátio'
             LIMIT 1
         `;
 
@@ -1831,7 +1830,7 @@ protectedHandle('get-dashboard-data', () => {
                                   JOIN lotes l ON t.lote_id = l.id WHERE t.status = 'pátio' GROUP BY l.numero ORDER BY volumeTotal DESC LIMIT 4`).all();
         const ranking = db.prepare(`SELECT e.nome as especie, SUM(t.volume) as volumeTotal FROM toras t JOIN especies e ON t.especie_id = e.id
                                      WHERE t.status = 'pátio' GROUP BY e.id ORDER BY volumeTotal DESC LIMIT 5`).all();
-        
+
         // Histórico de movimentação dos últimos 6 meses (Entradas e Saídas)
         const historicoEntradas = db.prepare(`
             SELECT strftime('%Y-%m', data_entrada) as mes, SUM(volume) as vol 
@@ -1860,11 +1859,11 @@ protectedHandle('get-dashboard-data', () => {
         const historicoMovimentacao = meses.map(m => {
             const ent = historicoEntradas.find(e => e.mes === m);
             const sai = historicoSaidas.find(s => s.mes === m);
-            
+
             const partes = m.split('-');
             const dataObjeto = new Date(parseInt(partes[0]), parseInt(partes[1]) - 1, 1);
             const labelMes = dataObjeto.toLocaleString('pt-BR', { month: 'short' }).replace('.', '');
-            
+
             return {
                 mes: m,
                 label: labelMes.charAt(0).toUpperCase() + labelMes.slice(1),
@@ -1901,7 +1900,7 @@ ipcMain.handle('sincronizar-assinatura-forced', async () => {
     try {
         // Pega o último usuário logado diretamente do banco local (mais rápido e seguro que getSession)
         const ultimoUsuario = db.prepare("SELECT email FROM usuarios ORDER BY last_login DESC LIMIT 1").get();
-        
+
         if (!ultimoUsuario) {
             console.error("❌ [SYNC] Nenhum usuário encontrado no banco local.");
             return { success: false, error: "Nenhum usuário logado anteriormente neste PC." };
@@ -1930,10 +1929,10 @@ ipcMain.handle('sincronizar-assinatura-forced', async () => {
                 console.log("✅ [SYNC] Assinatura válida! Atualizando licença local...");
                 const appData = app.getPath('userData');
                 const arquivoLicenca = path.join(appData, 'estoque-toras', 'license.dat');
-                
+
                 const novaLicenca = { mid: machineIdSync(), exp: assinatura.valid_until, last_seen: agora.toISOString() };
                 fs.writeFileSync(arquivoLicenca, criptografar(JSON.stringify(novaLicenca)));
-                
+
                 sistemaAtivado = true;
                 motivoBloqueio = 'ok';
                 return { success: true };
@@ -1942,7 +1941,7 @@ ipcMain.handle('sincronizar-assinatura-forced', async () => {
                 return { success: false, error: "Sua assinatura ainda consta como vencida." };
             }
         }
-        
+
         console.warn("⚠️ [SYNC] Nenhuma assinatura ativa encontrada.");
         return { success: false, error: "Assinatura não encontrada ou inativa." };
 
@@ -2042,7 +2041,7 @@ protectedHandle('get-sync-status', async () => {
         const torasCount = db.prepare("SELECT COUNT(*) as count FROM toras WHERE sync_status = 'pending'").get().count;
         const lotesCount = db.prepare("SELECT COUNT(*) as count FROM lotes WHERE sync_status = 'pending'").get().count;
         const romaneiosCount = db.prepare("SELECT COUNT(*) as count FROM romaneios WHERE sync_status = 'pending'").get().count;
-        
+
         return {
             success: true,
             pending: torasCount + lotesCount + romaneiosCount,
@@ -2105,9 +2104,9 @@ ipcMain.handle('ativar-sistema', async (event, chaveDigitada) => {
                 exp: expiraEm.toISOString(),
                 last_seen: new Date().toISOString()
             };
-            
+
             fs.writeFileSync(arquivoLicenca, criptografar(JSON.stringify(novaLicenca)));
-            
+
             sistemaAtivado = true;
             return { success: true, validade: expiraEm.toLocaleDateString() };
         } else {
@@ -2142,19 +2141,19 @@ protectedHandle('supabase-login', async (event, { email, password }) => {
                 if (assinatura && assinatura.status === 'ativo') {
                     const appData = app.getPath('userData');
                     const arquivoLicenca = path.join(appData, 'estoque-toras', 'license.dat');
-                    
+
                     const novaLicenca = {
                         mid: machineIdSync(),
                         exp: assinatura.valid_until,
                         last_seen: new Date().toISOString()
                     };
-                    
+
                     fs.writeFileSync(arquivoLicenca, criptografar(JSON.stringify(novaLicenca)));
-                    
+
                     // Verifica se a data baixada já está vencida e trava NA HORA
                     const agora = new Date();
                     const dataVencimento = new Date(assinatura.valid_until);
-                    
+
                     if (agora > dataVencimento) {
                         console.error(`❌ Assinatura VENCIDA detectada para ${email}. Bloqueando sistema.`);
                         sistemaAtivado = false;
@@ -2183,7 +2182,7 @@ protectedHandle('supabase-login', async (event, { email, password }) => {
 
             if (userLocal) {
                 let match = false;
-                
+
                 // MIGRACAO / COMPATIBILIDADE: Se não possuir salt, usa hash legado e atualiza
                 if (!userLocal.password_salt) {
                     const hashDigitadoLegacy = hashPasswordLegacy(password);
@@ -2338,7 +2337,7 @@ protectedHandle('calcular-previa-fechamento', async (event, filtros) => {
             paramsCargas.push(romaneioInicio, romaneioFim);
         }
         sqlCargas += " GROUP BY r.id ORDER BY r.data ASC, r.id ASC";
-        
+
         const cargas = db.prepare(sqlCargas).all(...paramsCargas);
         const totalComissao = cargas.reduce((sum, c) => sum + (c.valor_comissao || 0), 0);
 
@@ -2349,7 +2348,7 @@ protectedHandle('calcular-previa-fechamento', async (event, filtros) => {
             WHERE motorista_id = ? AND status = 'aberto'
             ORDER BY data ASC
         `).all(motoristaId);
-        
+
         const totalVales = vales.reduce((sum, v) => sum + v.valor, 0);
 
         return {
@@ -2487,7 +2486,7 @@ protectedHandle('get-fechamento-detalhado', async (event, id) => {
             WHERE r.motorista_id = ?
         `;
         const paramsCargas = [fechamento.motorista_id];
-        
+
         if (fechamento.romaneio_inicio && fechamento.romaneio_fim) {
             sqlCargas += " AND CAST(r.numero AS INTEGER) BETWEEN CAST(? AS INTEGER) AND CAST(? AS INTEGER)";
             paramsCargas.push(fechamento.romaneio_inicio, fechamento.romaneio_fim);
@@ -2496,7 +2495,7 @@ protectedHandle('get-fechamento-detalhado', async (event, id) => {
             paramsCargas.push(fechamento.periodo_inicio, fechamento.periodo_fim);
         }
         sqlCargas += " GROUP BY r.id ORDER BY r.data ASC, r.id ASC";
-        
+
         const cargas = db.prepare(sqlCargas).all(...paramsCargas);
 
         // 2. Busca os vales descontados neste fechamento

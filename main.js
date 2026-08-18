@@ -187,7 +187,18 @@ let splash;
 // --- CONFIGURAÇÃO DO BANCO DE DADOS ---
 const dbPath = path.join(app.getPath('userData'), 'toracontroll.db');
 const db = new Database(dbPath);
-db.pragma('foreign_keys = ON');
+
+// Desativa chaves estrangeiras temporariamente para rodar as migrações com segurança
+db.pragma('foreign_keys = OFF');
+
+function columnExists(table, column) {
+    try {
+        const info = db.prepare(`PRAGMA table_info(${table})`).all();
+        return info.some(col => col.name === column);
+    } catch (e) {
+        return false;
+    }
+}
 
 // Arquivo de configuração de backup
 const configPath = path.join(app.getPath('userData'), 'backup-config.json');
@@ -347,13 +358,9 @@ db.exec(`
     );
 
     CREATE INDEX IF NOT EXISTS idx_toras_codigo ON toras(codigo);
-    CREATE INDEX IF NOT EXISTS idx_toras_status ON toras(status);
     CREATE INDEX IF NOT EXISTS idx_toras_lote ON toras(lote_id);
-    CREATE INDEX IF NOT EXISTS idx_toras_romaneio ON toras(romaneio_id);
     CREATE INDEX IF NOT EXISTS idx_logs_data ON logs(data_hora);
     CREATE INDEX IF NOT EXISTS idx_toras_especie ON toras(especie_id);
-    CREATE INDEX IF NOT EXISTS idx_romaneios_fornecedor ON romaneios(fornecedor_id);
-    CREATE INDEX IF NOT EXISTS idx_romaneios_motorista ON romaneios(motorista_id);
     CREATE INDEX IF NOT EXISTS idx_motorista_vales_motorista ON motorista_vales(motorista_id);
     CREATE INDEX IF NOT EXISTS idx_motorista_fechamentos_motorista ON motorista_fechamentos(motorista_id);
 `);
@@ -368,13 +375,32 @@ try { db.exec("ALTER TABLE toras ADD COLUMN data_saida TEXT;"); } catch (e) { }
 try { db.exec("ALTER TABLE toras ADD COLUMN volume_bruto REAL DEFAULT 0;"); } catch (e) { }
 try { db.exec("ALTER TABLE toras ADD COLUMN rodo_bruto INTEGER DEFAULT 0;"); } catch (e) { }
 try { db.exec("ALTER TABLE toras ADD COLUMN comprimento_bruto REAL DEFAULT 0;"); } catch (e) { }
+
+// Criação de índices para colunas de toras recém-adicionadas
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_toras_status ON toras(status);"); } catch (e) { }
 // Migração: vinculação de toras a romaneios
-try { db.exec("ALTER TABLE toras ADD COLUMN romaneio_id INTEGER REFERENCES romaneios(id);"); } catch (e) { }
+if (!columnExists('toras', 'romaneio_id')) {
+    try {
+        db.exec("ALTER TABLE toras ADD COLUMN romaneio_id INTEGER REFERENCES romaneios(id);");
+    } catch (e) {
+        console.error("Erro ao adicionar romaneio_id com FOREIGN KEY:", e.message);
+        try {
+            db.exec("ALTER TABLE toras ADD COLUMN romaneio_id INTEGER;");
+            console.log("Fallback aplicado: coluna romaneio_id criada sem FK constraint.");
+        } catch (err2) {
+            console.error("Erro crítico ao criar romaneio_id:", err2.message);
+        }
+    }
+}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_toras_romaneio ON toras(romaneio_id);"); } catch (e) { }
 try { db.exec("ALTER TABLE romaneios ADD COLUMN fornecedor_id INTEGER REFERENCES fornecedores(id);"); } catch (e) { }
 try { db.exec("ALTER TABLE romaneios ADD COLUMN motorista_id INTEGER REFERENCES motoristas(id);"); } catch (e) { }
 try { db.exec("ALTER TABLE romaneios ADD COLUMN frete_valor REAL DEFAULT 0;"); } catch (e) { }
 try { db.exec("ALTER TABLE romaneios ADD COLUMN frete_total REAL DEFAULT 0;"); } catch (e) { }
+
+// Criação de índices para colunas de romaneios recém-adicionadas
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_romaneios_fornecedor ON romaneios(fornecedor_id);"); } catch (e) { }
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_romaneios_motorista ON romaneios(motorista_id);"); } catch (e) { }
 
 // Migrações para suporte a Sincronização em Nuvem (Cloud Sync)
 try { db.exec("ALTER TABLE toras ADD COLUMN sync_status TEXT DEFAULT 'pending';"); } catch (e) { }
@@ -389,6 +415,9 @@ try { db.exec("UPDATE romaneios SET updated_at = CURRENT_TIMESTAMP WHERE updated
 
 // Migrações para senha com criptografia forte (PBKDF2)
 try { db.exec("ALTER TABLE usuarios ADD COLUMN password_salt TEXT;"); } catch (e) { }
+
+// Reativa chaves estrangeiras após a conclusão de todas as migrações
+db.pragma('foreign_keys = ON');
 
 // --- JANELA PRINCIPAL COM TRAVAS DE PRODUÇÃO ---
 const packageInfo = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));

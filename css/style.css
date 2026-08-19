@@ -211,20 +211,8 @@ body.dark-mode .shadow-premium {
     margin-left: 80px;
 }
 
-/* Configuração do Tooltip */
-#sidebar.minimized li[data-tooltip] {
-    position: relative;
-}
-
-#sidebar.minimized li[data-tooltip]::after {
-    content: attr(data-tooltip);
-    /* Pega o texto do atributo HTML */
-    position: absolute;
-    left: 100%;
-    /* Aparece à direita do ícone */
-    top: 50%;
-    transform: translateY(-50%);
-    margin-left: 10px;
+/* Configuração do Tooltip (Via JS, para evitar clipping de scroll em resoluções menores) */
+.sidebar-tooltip-active {
     padding: 8px 12px;
     background: var(--sidebar-bg);
     color: var(--text-main);
@@ -232,18 +220,14 @@ body.dark-mode .shadow-premium {
     border-radius: 6px;
     border: 1px solid var(--border-color);
     white-space: nowrap;
-    opacity: 0;
-    visibility: hidden;
-    transition: opacity 0.2s;
     pointer-events: none;
-    z-index: 9999;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    animation: fadeInTooltip 0.12s ease-out;
 }
 
-/* Mostra o balão ao passar o mouse apenas se estiver minimizado */
-#sidebar.minimized li[data-tooltip]:hover::after {
-    opacity: 1;
-    visibility: visible;
+@keyframes fadeInTooltip {
+    from { opacity: 0; transform: translateY(-50%) scale(0.95); }
+    to { opacity: 1; transform: translateY(-50%) scale(1); }
 }
 
 /* SIDEBAR */
@@ -261,6 +245,7 @@ body.dark-mode .shadow-premium {
     /* Scrollbar fina (Firefox) */
     scrollbar-width: thin;
     scrollbar-color: transparent transparent;
+    flex-shrink: 0; /* Impede a sidebar de encolher devido a conteúdos largos no wrapper */
 }
 
 /* Scrollbar fina e discreta — Webkit (Chrome, Electron) */
@@ -304,8 +289,8 @@ body.dark-mode #sidebar:hover::-webkit-scrollbar-thumb:hover {
 #sidebar.minimized {
     width: 80px;
     min-width: 80px;
-    overflow: visible;
-    /* Sobrescreve a largura padrão */
+    overflow: hidden;
+    overflow-y: auto;
 }
 
 .sidebar-header {
@@ -411,10 +396,7 @@ body.dark-mode #sidebar:hover::-webkit-scrollbar-thumb:hover {
     /* Permite que os tooltips do modo minimizado apareçam */
 }
 
-/* No modo minimizado os tooltips precisam de overflow visible na sidebar */
-#sidebar.minimized .components {
-    overflow: visible;
-}
+
 
 .components li {
     margin-bottom: 4px;
@@ -437,6 +419,13 @@ body.dark-mode #sidebar:hover::-webkit-scrollbar-thumb:hover {
     width: 20px;
     height: 20px;
     stroke-width: 2px;
+    flex-shrink: 0; /* Impede o ícone de encolher se houver quebra de layout */
+}
+
+/* Impede todos os ícones da sidebar de encolherem */
+#sidebar a i,
+#sidebar .dark-mode-toggle i {
+    flex-shrink: 0;
 }
 
 /* Item Ativo (Estilo MT PRÓ) */

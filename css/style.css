@@ -2745,5 +2745,303 @@ body.dark-mode .svg-chart-bar-sai:hover {
     color: var(--accent-color, #6366f1);
 }
 
+/* ==========================================================================
+   MODAL DE DETALHES DA TORA (BUSCA GLOBAL DASHBOARD)
+   ========================================================================== */
+.modal-tora-popup {
+    border-radius: 18px !important;
+    overflow: hidden !important;
+    padding: 0 !important;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25) !important;
+    border: 1px solid var(--border-color) !important;
+    background: var(--card-bg) !important;
+}
+
+.modal-tora-body-wrapper {
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: hidden !important;
+}
+
+.modal-tora-header {
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.08) 0%, rgba(59, 130, 246, 0.04) 100%);
+    padding: 24px 28px 18px 28px;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    position: relative;
+}
+
+body.dark-mode .modal-tora-header {
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(30, 41, 59, 0.6) 100%);
+}
+
+.modal-tora-title-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    text-align: left;
+}
+
+.modal-tora-badge-num {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--accent-color);
+    background: var(--active-item-bg);
+    padding: 4px 10px;
+    border-radius: 20px;
+    width: fit-content;
+}
+
+.modal-tora-badge-num i {
+    width: 13px;
+    height: 13px;
+}
+
+.modal-tora-title {
+    font-size: 1.45rem;
+    font-weight: 800;
+    color: var(--text-dark);
+    margin: 4px 0 0 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.modal-tora-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border-radius: 30px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.modal-tora-status i {
+    width: 14px;
+    height: 14px;
+}
+
+.modal-tora-status.patio {
+    background: #ecfdf5;
+    color: #059669;
+    border: 1px solid #a7f3d0;
+}
+
+body.dark-mode .modal-tora-status.patio {
+    background: rgba(16, 185, 129, 0.2);
+    color: #34d399;
+    border-color: rgba(16, 185, 129, 0.4);
+}
+
+.modal-tora-status.serrada {
+    background: #fee2e2;
+    color: #dc2626;
+    border: 1px solid #fca5a5;
+}
+
+body.dark-mode .modal-tora-status.serrada {
+    background: rgba(239, 68, 68, 0.2);
+    color: #f87171;
+    border-color: rgba(239, 68, 68, 0.4);
+}
+
+.modal-tora-body {
+    padding: 24px 28px !important;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    text-align: left;
+    color: var(--text-dark);
+}
+
+/* Cards de Destaque */
+.modal-tora-hero-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+}
+
+.modal-tora-card-metric {
+    background: var(--input-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    padding: 16px 18px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    transition: all 0.2s ease;
+}
+
+.modal-tora-card-metric.highlight {
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.08) 0%, rgba(99, 102, 241, 0.02) 100%);
+    border: 1.5px solid var(--accent-color);
+}
+
+body.dark-mode .modal-tora-card-metric.highlight {
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(99, 102, 241, 0.05) 100%);
+}
+
+.modal-tora-metric-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    background: var(--active-item-bg);
+    color: var(--accent-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.modal-tora-metric-icon i {
+    width: 22px;
+    height: 22px;
+}
+
+.modal-tora-card-metric.highlight .modal-tora-metric-icon {
+    background: var(--accent-color);
+    color: #ffffff;
+}
+
+.modal-tora-metric-info {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.modal-tora-metric-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-main);
+    margin-bottom: 2px;
+}
+
+.modal-tora-metric-value {
+    font-size: 1.35rem;
+    font-weight: 800;
+    color: var(--text-dark);
+    line-height: 1.1;
+}
+
+.modal-tora-card-metric.highlight .modal-tora-metric-value {
+    color: var(--accent-color);
+}
+
+/* Grid de detalhes */
+.modal-tora-grid-details {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+.modal-tora-panel {
+    background: var(--input-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    padding: 16px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.modal-tora-panel-title {
+    font-size: 0.82rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-main);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-bottom: 1px dashed var(--border-color);
+    padding-bottom: 8px;
+    margin: 0;
+}
+
+.modal-tora-panel-title i {
+    width: 15px;
+    height: 15px;
+    color: var(--accent-color);
+}
+
+.modal-tora-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.88rem;
+    line-height: 1.3;
+}
+
+.modal-tora-item-label {
+    color: var(--text-main);
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.modal-tora-item-label i {
+    width: 14px;
+    height: 14px;
+    opacity: 0.7;
+}
+
+.modal-tora-item-val {
+    color: var(--text-dark);
+    font-weight: 700;
+    text-align: right;
+}
+
+/* Alerta de Oco */
+.modal-tora-oco-box {
+    background: #fff1f2;
+    border: 1px dashed #fecdd3;
+    border-radius: 10px;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    color: #e11d48;
+    margin-top: 4px;
+}
+
+body.dark-mode .modal-tora-oco-box {
+    background: rgba(225, 29, 72, 0.12);
+    border-color: rgba(225, 29, 72, 0.3);
+    color: #fda4af;
+}
+
+.modal-tora-oco-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 700;
+    font-size: 0.83rem;
+}
+
+.modal-tora-oco-header i {
+    width: 14px;
+    height: 14px;
+}
+
+.modal-tora-oco-detail {
+    font-size: 0.78rem;
+    opacity: 0.95;
+    padding-left: 20px;
+}
+
+
 
 

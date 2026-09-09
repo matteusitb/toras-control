@@ -1147,10 +1147,14 @@ protectedHandle('buscar-tora-por-numero', async (event, numero) => {
         // 2. Tentativa: Busca convertendo ambos para número (resolve 003 vs 3)
         // 3. Tentativa: Busca usando LIKE (caso o código tenha prefixos)
         const sql = `
-            SELECT t.*, e.nome as especie_nome, l.numero 
+            SELECT t.*, 
+                   e.nome as especie_nome, 
+                   l.numero as lote_numero,
+                   r.numero as romaneio_numero
             FROM toras t
             LEFT JOIN especies e ON t.especie_id = e.id
             LEFT JOIN lotes l ON t.lote_id = l.id
+            LEFT JOIN romaneios r ON t.romaneio_id = r.id
             WHERE TRIM(t.codigo) = ? 
                OR CAST(t.codigo AS INTEGER) = CAST(? AS INTEGER)
                OR t.codigo LIKE ?
@@ -1161,10 +1165,8 @@ protectedHandle('buscar-tora-por-numero', async (event, numero) => {
         const tora = db.prepare(sql).get(termo, termo, `%${termo}%`);
 
         if (tora) {
-            console.log("Tora encontrada:", tora.codigo); // Log no terminal do VS Code
             return { success: true, data: tora };
         } else {
-            console.log("Nenhuma tora encontrada com o termo:", termo);
             return { success: false, error: "Não localizado." };
         }
     } catch (error) {
@@ -1300,10 +1302,13 @@ protectedHandle('get-proximo-numero-romaneio', async () => {
     }
 });
 
-protectedHandle('listar-romaneios', async () => {
-
+protectedHandle('listar-romaneios', async (event, filtros = {}) => {
     try {
-        return db.prepare(`
+        const limite = (filtros && filtros.limite !== undefined) ? Number(filtros.limite) : 50;
+        const pular = (filtros && filtros.pular !== undefined) ? Number(filtros.pular) : 0;
+        const todos = filtros && filtros.todos;
+
+        let sql = `
             SELECT r.*,
                 f.nome as fornecedor_nome,
                 m.nome as motorista_nome,
@@ -1316,7 +1321,14 @@ protectedHandle('listar-romaneios', async () => {
             LEFT JOIN motoristas m ON r.motorista_id = m.id
             GROUP BY r.id
             ORDER BY r.data DESC, r.id DESC
-        `).all();
+        `;
+
+        if (todos) {
+            return db.prepare(sql).all();
+        }
+
+        sql += " LIMIT ? OFFSET ?";
+        return db.prepare(sql).all(limite, pular);
     } catch (err) {
         console.error('Erro ao listar romaneios:', err);
         return [];

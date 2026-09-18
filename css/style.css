@@ -2477,6 +2477,39 @@ body.dark-mode .rom-tot-bruto {
     color: #38bdf8;
 }
 
+/* Total oco */
+.rom-tot-oco {
+    color: #e11d48;
+}
+
+body.dark-mode .rom-tot-oco {
+    color: #fb7185;
+}
+
+/* Badge oco na tabela */
+.badge-oco {
+    display: inline-block;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #e11d48;
+}
+
+body.dark-mode .badge-oco {
+    color: #fb7185;
+}
+
+.oco-desconto-subtext {
+    display: block;
+    font-size: 0.72rem;
+    color: #e11d48;
+    font-weight: 700;
+    opacity: 0.9;
+}
+
+body.dark-mode .oco-desconto-subtext {
+    color: #fb7185;
+}
+
 /* --- Painel de detalhes do romaneio --- */
 .rom-painel-detalhes {
     border-top: 4px solid #0284c7;

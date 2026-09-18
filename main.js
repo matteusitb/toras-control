@@ -2019,15 +2019,42 @@ ipcMain.handle('get-appdata-path', () => {
     return process.env.APPDATA || (process.platform === 'darwin' ? process.env.HOME + '/Library/Preferences' : process.env.HOME + '/.local/share');
 });
 
-protectedHandle('gerar-pdf-logs', async (event, html) => {
+protectedHandle('gerar-pdf-logs', async (event, payloadOrHtml, maybeNomeArquivo) => {
+    let html = '';
+    let nomeArquivo = '';
+
+    if (typeof payloadOrHtml === 'object' && payloadOrHtml !== null) {
+        html = payloadOrHtml.html || '';
+        nomeArquivo = payloadOrHtml.nomeArquivo || payloadOrHtml.nome || '';
+    } else {
+        html = payloadOrHtml || '';
+        nomeArquivo = maybeNomeArquivo || '';
+    }
+
     let winPDF = new BrowserWindow({ show: false });
     await winPDF.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
     const pdfData = await winPDF.webContents.printToPDF({ printBackground: true, pageSize: 'A4' });
-    const filePath = path.join(app.getPath('documents'), `Relatorio_${Date.now()}.pdf`);
+    
+    let nomeFinal = '';
+    if (nomeArquivo && typeof nomeArquivo === 'string' && nomeArquivo.trim().length > 0) {
+        const sanitizado = nomeArquivo.replace(/[\/\\:*?"<>|]/g, '-').trim();
+        nomeFinal = sanitizado.toLowerCase().endsWith('.pdf') ? sanitizado : `${sanitizado}.pdf`;
+    } else {
+        const agora = new Date();
+        const dia = String(agora.getDate()).padStart(2, '0');
+        const mes = String(agora.getMonth() + 1).padStart(2, '0');
+        const ano = agora.getFullYear();
+        const hora = String(agora.getHours()).padStart(2, '0');
+        const min = String(agora.getMinutes()).padStart(2, '0');
+        const seg = String(agora.getSeconds()).padStart(2, '0');
+        nomeFinal = `Relatorio_${dia}-${mes}-${ano}_${hora}h${min}m${seg}.pdf`;
+    }
+    
+    const filePath = path.join(app.getPath('documents'), nomeFinal);
     fs.writeFileSync(filePath, pdfData);
     shell.showItemInFolder(filePath);
     winPDF.close();
-    return { success: true };
+    return { success: true, filePath, nomeArquivo: nomeFinal };
 });
 
 protectedHandle('exportar-backup', async () => {

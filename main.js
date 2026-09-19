@@ -471,38 +471,112 @@ function createWindow() {
     }
 }
 
-// Configuração de logs para o Updater (útil para debug se algo falhar)
+// Configuração de logs e comportamento do AutoUpdater
 autoUpdater.logger = require("electron-log");
 autoUpdater.logger.transports.file.level = "info";
+autoUpdater.autoDownload = false;
+autoUpdater.autoInstallOnAppQuit = false;
 
 function setupAutoUpdater(window) {
-    // Verifica se há atualizações assim que o app inicia
-    autoUpdater.checkForUpdatesAndNotify();
+    if (!window || window.isDestroyed()) return;
 
-    // Evento disparado quando uma atualização é encontrada
-    autoUpdater.on('update-available', () => {
-        window.webContents.send('status-atualizacao', 'Nova versão encontrada. Baixando...');
+    // Remove event listeners antigos se a função for reexecutada
+    autoUpdater.removeAllListeners();
+
+    // 1. Quando uma nova versão é encontrada no GitHub/servidor
+    autoUpdater.on('update-available', (info) => {
+        console.log("📢 Nova versão disponível:", info.version);
+        if (window && !window.isDestroyed()) {
+            window.webContents.send('update-available', {
+                version: info.version,
+                releaseNotes: info.releaseNotes || '',
+                releaseDate: info.releaseDate || ''
+            });
+        }
     });
 
-    // Evento disparado quando o download termina
+    // 2. Quando o sistema já está atualizado
+    autoUpdater.on('update-not-available', (info) => {
+        console.log("✅ Sistema atualizado. Nenhuma nova versão encontrada.");
+        if (window && !window.isDestroyed()) {
+            window.webContents.send('update-not-available', {
+                version: info?.version || app.getVersion()
+            });
+        }
+    });
+
+    // 3. Progresso do download da atualização
+    autoUpdater.on('download-progress', (progressObj) => {
+        if (window && !window.isDestroyed()) {
+            window.webContents.send('update-download-progress', {
+                percent: Math.round(progressObj.percent || 0),
+                bytesPerSecond: progressObj.bytesPerSecond || 0,
+                transferred: progressObj.transferred || 0,
+                total: progressObj.total || 0
+            });
+        }
+    });
+
+    // 4. Download finalizado com sucesso
     autoUpdater.on('update-downloaded', (info) => {
-        dialog.showMessageBox({
-            type: 'info',
-            title: 'Atualização Pronta',
-            message: `A versão ${info.version} foi baixada. Deseja reiniciar para atualizar agora?`,
-            buttons: ['Sim, reiniciar', 'Depois']
-        }).then((result) => {
-            if (result.response === 0) {
-                autoUpdater.quitAndInstall();
-            }
-        });
+        console.log("🎉 Download da atualização concluído com sucesso:", info.version);
+        if (window && !window.isDestroyed()) {
+            window.webContents.send('update-downloaded', {
+                version: info.version
+            });
+        }
     });
 
-    // Tratar erros (importante para não travar o app se o GitHub estiver fora)
+    // 5. Tratamento de erros
     autoUpdater.on('error', (err) => {
-        console.error("Erro no Updater: ", err);
+        console.error("❌ Erro no AutoUpdater:", err);
+        if (window && !window.isDestroyed()) {
+            window.webContents.send('update-error', err?.message || 'Falha na comunicação com o servidor de atualizações.');
+        }
     });
+
+    // Verifica atualizações automaticamente após a inicialização
+    setTimeout(() => {
+        if (app.isPackaged) {
+            autoUpdater.checkForUpdates().catch((err) => {
+                console.warn("Aviso ao verificar atualizações na inicialização:", err.message);
+            });
+        }
+    }, 4000);
 }
+
+// --- IPC HANDLERS DE ATUALIZAÇÃO ---
+ipcMain.handle('verificar-atualizacoes', async () => {
+    try {
+        if (!app.isPackaged) {
+            return { success: true, isDev: true, version: app.getVersion() };
+        }
+        const result = await autoUpdater.checkForUpdates();
+        return { success: true, updateInfo: result?.updateInfo };
+    } catch (err) {
+        console.error("Erro ao verificar atualizações:", err);
+        return { success: false, error: err.message };
+    }
+});
+
+ipcMain.handle('iniciar-download-update', async () => {
+    try {
+        await autoUpdater.downloadUpdate();
+        return { success: true };
+    } catch (err) {
+        console.error("Erro ao iniciar download de atualização:", err);
+        return { success: false, error: err.message };
+    }
+});
+
+ipcMain.handle('instalar-update-agora', () => {
+    autoUpdater.quitAndInstall(false, true);
+    return { success: true };
+});
+
+ipcMain.handle('get-app-version', () => {
+    return app.getVersion();
+});
 
 // --- LÓGICA DE BACKUP AGENDADO ---
 let ultimoBackupExecutado = ''; // Evita duplicar no mesmo minuto

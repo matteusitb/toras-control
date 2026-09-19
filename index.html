@@ -11,6 +11,7 @@
     <script src="libs/jspdf.umd.min.js"></script>
     <script src="libs/jspdf-autotable.min.js"></script>
     <script src="libs/exceljs.min.js"></script>
+    <script src="logo-data.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             if (typeof lucide !== 'undefined') {
@@ -1143,15 +1144,13 @@
                             <div style="margin-top: 30px;">
                                 <div class="form-section-title">Toras Adicionadas a este Romaneio</div>
                                 <div class="rom-tabela-wrapper">
-                                    <table class="custom-table" style="margin: 0; min-width: 750px;">
+                                    <table class="custom-table" style="margin: 0; min-width: 650px;">
                                         <thead>
                                             <tr>
                                                 <th>Número</th>
                                                 <th>Espécie</th>
                                                 <th>Lote</th>
-                                                <th style="text-align:center;">Rodo (Líq/Bruto)</th>
-                                                <th style="text-align:center;">Comp (Líq/Bruto)</th>
-                                                <th style="text-align:center;">Oco (D1×D2 / Desconto)</th>
+                                                <th style="text-align:left; padding-left: 15px;">Medidas (Líq. / Bruto)</th>
                                                 <th style="text-align:center;">Vol. Líquido (m³)</th>
                                                 <th style="text-align:center;">Vol. Bruto (m³)</th>
                                                 <th style="text-align:right; padding-right: 20px;">Ação</th>
@@ -1159,7 +1158,7 @@
                                         </thead>
                                         <tbody id="lista-toras-romaneio-temp">
                                             <tr>
-                                                <td colspan="9" class="rom-empty-msg">Nenhuma tora vinculada a este romaneio ainda.</td>
+                                                <td colspan="7" class="rom-empty-msg">Nenhuma tora vinculada a este romaneio ainda.</td>
                                             </tr>
                                         </tbody>
                                     </table>
@@ -1243,15 +1242,13 @@
 
                             <div class="form-section-title">Listagem de Toras</div>
                             <div style="overflow-x: auto; -webkit-overflow-scrolling: touch; margin-top: 10px;">
-                                <table class="custom-table" style="min-width: 700px;">
+                                <table class="custom-table" style="min-width: 650px;">
                                     <thead>
                                         <tr>
                                             <th>Número</th>
                                             <th>Espécie</th>
                                             <th>Lote</th>
-                                            <th style="text-align:center;">Rodo (Líq/Bruto)</th>
-                                            <th style="text-align:center;">Comp (Líq/Bruto)</th>
-                                            <th style="text-align:center;">Oco (D1×D2 / Desconto)</th>
+                                            <th style="text-align:left; padding-left: 15px;">Medidas (Líq. / Bruto)</th>
                                             <th style="text-align:center;">Vol. Líquido (m³)</th>
                                             <th style="text-align:center;">Vol. Bruto (m³)</th>
                                             <th style="text-align:center;">Status</th>
@@ -1875,6 +1872,34 @@
                         </div>
                     </div>
 
+                    <!-- CARD DE ATUALIZAÇÕES DO SISTEMA -->
+                    <div class="form-card" style="border-top: 4px solid #10b981;">
+                        <div class="form-header">
+                            <div class="header-icon" style="background: #d1fae5; color: #059669;"><i
+                                    data-lucide="sparkles"></i></div>
+                            <div>
+                                <h3>Atualizações do Sistema</h3>
+                                <p>Gerenciamento de versões e releases automáticos</p>
+                            </div>
+                        </div>
+                        <div class="form-body">
+                            <div
+                                style="display: flex; align-items: center; justify-content: space-between; padding: 20px; border-radius: 8px; border: 1px solid var(--border-color, #e2e8f0); background: var(--bg-card, #f8fafc);">
+                                <div>
+                                    <h4 class="text-title" style="margin-bottom: 5px; font-weight: 700;">Versão Atual Instalada</h4>
+                                    <p class="text-muted" style="font-size: 13px;">
+                                        <span id="cfg-versao-atual-tag" style="background: #dcfce7; color: #15803d; padding: 3px 8px; border-radius: 4px; font-weight: 700; font-size: 12px;">v1.1.8</span>
+                                        &nbsp;• Canal Oficial de Atualizações
+                                    </p>
+                                </div>
+                                <button class="btn-save" onclick="verificarAtualizacaoManual()"
+                                    style="background: #10b981; color: white; border: none; padding: 10px 20px; width: auto; display: flex; align-items: center; gap: 8px;">
+                                    <i data-lucide="refresh-cw" id="icon-check-update"></i> <span id="text-check-update">Verificar Atualizações</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="form-card" style="border-top: 4px solid #f87171;">
                         <div class="form-header">
                             <div class="header-icon" style="background: #fee2e2; color: #ef4444;"><i
@@ -1900,7 +1925,7 @@
                         </div>
 
                         <div class="form-footer" style="background: #f8fafc; font-size: 12px; color: #64748b;">
-                            ToraControl v1.0.0 | Status: Conectado
+                            MT-PRO - Controle de Estoque de Toras <span id="cfg-footer-versao">v1.1.8</span> | Status: Conectado
                         </div>
                     </div>
                 </div>

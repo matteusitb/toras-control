@@ -1830,9 +1830,30 @@
                             </div>
 
                             <div class="rom-tabela-wrapper" style="margin-top: 25px; display: none;" id="rel-forn-tabela-container">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding: 0 4px; flex-wrap: wrap; gap: 10px;">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span style="font-size: 0.9rem; font-weight: 700; color: var(--text-dark);" id="rel-forn-selecionados-info">
+                                            0 romaneios selecionados
+                                        </span>
+                                        <span style="font-size: 0.8rem; color: var(--text-muted);">
+                                            (Desmarque os romaneios que não farão parte do acerto)
+                                        </span>
+                                    </div>
+                                    <div style="display: flex; gap: 8px;">
+                                        <button type="button" class="btn-cancel" onclick="selecionarTodosRomaneiosFornecedor(true)" style="padding: 4px 10px; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 4px; cursor: pointer;">
+                                            <i data-lucide="check-square" style="width: 14px; height: 14px;"></i> Marcar Todos
+                                        </button>
+                                        <button type="button" class="btn-cancel" onclick="selecionarTodosRomaneiosFornecedor(false)" style="padding: 4px 10px; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 4px; cursor: pointer;">
+                                            <i data-lucide="square" style="width: 14px; height: 14px;"></i> Desmarcar Todos
+                                        </button>
+                                    </div>
+                                </div>
                                 <table class="custom-table" style="min-width: 800px;">
                                     <thead>
                                         <tr>
+                                            <th style="width: 44px; text-align: center;">
+                                                <input type="checkbox" id="rel-forn-select-all" onchange="selecionarTodosRomaneiosFornecedor(this.checked)" title="Marcar/Desmarcar todos" checked style="cursor: pointer; width: 16px; height: 16px;">
+                                            </th>
                                             <th>Número Romaneio</th>
                                             <th>Data Entrada</th>
                                             <th>Fornecedor</th>
@@ -1881,7 +1902,7 @@
                             </div>
 
                             <div class="rom-resumo-totais" id="rel-forn-resumo" style="display: none; border-top: 1px solid var(--border-color); margin-top: 20px; padding-top: 15px;">
-                                <div>Total Romaneios: <span id="tot-forn-rom" style="color: var(--text-dark);">0</span></div>
+                                <div>Romaneios no Acerto: <span id="tot-forn-rom" style="color: var(--text-dark); font-weight: 700;">0</span></div>
                                 <div>Total Toras: <span id="tot-forn-toras" style="color: var(--text-dark);">0</span></div>
                                 <div>Total Líquido: <span id="tot-forn-liq" style="color: #10b981;">0,000 m³</span></div>
                                 <div>Total Bruto: <span id="tot-forn-bruto" style="color: #0284c7;">0,000 m³</span></div>

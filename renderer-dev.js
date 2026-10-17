@@ -5081,6 +5081,8 @@ function relockAllBrutoFields() {
 // NOVOS RELATÓRIOS: FORNECEDOR E MOTORISTA
 // ============================================================
 
+let relatorioFornecedorDadosAtuais = null;
+
 async function gerarRelatorioFornecedor() {
     const fornId = document.getElementById('rel-forn-id').value;
     const dataInicio = document.getElementById('rel-forn-inicio').value;
@@ -5099,38 +5101,36 @@ async function gerarRelatorioFornecedor() {
 
         const dados = Array.isArray(res) ? res : (res && res.romaneios ? res.romaneios : []);
         const resumoEspecies = (res && res.resumoEspecies) ? res.resumoEspecies : [];
+        const especiesPorRomaneio = (res && res.especiesPorRomaneio) ? res.especiesPorRomaneio : [];
+
+        relatorioFornecedorDadosAtuais = {
+            romaneios: dados,
+            resumoEspecies,
+            especiesPorRomaneio
+        };
 
         const tbody = document.getElementById('rel-forn-tabela-corpo');
         const container = document.getElementById('rel-forn-tabela-container');
         const resumo = document.getElementById('rel-forn-resumo');
         const espContainer = document.getElementById('rel-forn-especies-container');
-        const espTbody = document.getElementById('rel-forn-especies-corpo');
-        const espBadge = document.getElementById('rel-forn-especies-badge');
+        const infoEl = document.getElementById('rel-forn-selecionados-info');
 
         if (!dados || dados.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 30px; color: var(--text-main);">Nenhum romaneio encontrado para este filtro.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; padding: 30px; color: var(--text-main);">Nenhum romaneio encontrado para este filtro.</td></tr>`;
+            if (infoEl) infoEl.innerHTML = `<span style="color: var(--text-muted);">0 romaneios encontrados</span>`;
             container.style.display = 'block';
             if (espContainer) espContainer.style.display = 'none';
             resumo.style.display = 'none';
             return;
         }
 
-        let totRom = dados.length;
-        let totToras = 0;
-        let totLiq = 0;
-        let totBruto = 0;
-        let totFrete = 0;
-
-        tbody.innerHTML = '';
-        dados.forEach(r => {
-            totToras += r.total_toras;
-            totLiq += r.vol_liquido;
-            totBruto += r.vol_bruto;
-            totFrete += r.frete_total;
-
+        tbody.innerHTML = dados.map(r => {
             const dataFormat = new Date(r.data + 'T00:00:00').toLocaleDateString('pt-BR');
-            tbody.innerHTML += `
-                <tr>
+            return `
+                <tr id="rel-forn-tr-${r.id}" style="transition: opacity 0.2s, background-color 0.2s;">
+                    <td style="text-align: center;">
+                        <input type="checkbox" class="chk-rel-forn-romaneio" value="${r.id}" data-id="${r.id}" checked onchange="atualizarTotaisRelatorioFornecedor()" style="cursor: pointer; width: 16px; height: 16px;">
+                    </td>
                     <td>
                         <a href="javascript:void(0)" onclick="abrirModalDetalhesRomaneio(${r.id})" style="color: var(--accent-color, #6366f1); font-weight: 700; text-decoration: underline; display: inline-flex; align-items: center; gap: 5px; cursor: pointer;" title="Visualizar dados do romaneio ${r.numero}">
                             <i data-lucide="external-link" style="width: 14px; height: 14px;"></i>
@@ -5145,48 +5145,18 @@ async function gerarRelatorioFornecedor() {
                     <td style="text-align: right; font-weight: 700; color: #f59e0b;">R$ ${Number(r.frete_total).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                 </tr>
             `;
-        });
+        }).join('');
 
-        // Preenche resumo de metragem cúbica por espécie
-        if (espContainer && espTbody) {
-            if (resumoEspecies && resumoEspecies.length > 0) {
-                if (espBadge) {
-                    espBadge.innerText = `${resumoEspecies.length} ${resumoEspecies.length === 1 ? 'espécie' : 'espécies'}`;
-                }
-                espTbody.innerHTML = resumoEspecies.map(esp => {
-                    const pct = totLiq > 0 ? ((esp.vol_liquido / totLiq) * 100).toFixed(1).replace('.', ',') + '%' : '0,0%';
-                    return `
-                        <tr>
-                            <td><b>${esp.especie_nome}</b></td>
-                            <td style="text-align: center;">${esp.total_toras}</td>
-                            <td style="text-align: center; color: #10b981; font-weight: 700;">${Number(esp.vol_liquido).toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} m³</td>
-                            <td style="text-align: center; color: #0284c7; font-weight: 600;">${Number(esp.vol_bruto).toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} m³</td>
-                            <td style="text-align: right; padding-right: 20px; font-weight: 600; color: var(--text-dark);">${pct}</td>
-                        </tr>
-                    `;
-                }).join('');
-
-                const totEspTorasEl = document.getElementById('rel-forn-esp-tot-toras');
-                const totEspLiqEl = document.getElementById('rel-forn-esp-tot-liq');
-                const totEspBrutoEl = document.getElementById('rel-forn-esp-tot-bruto');
-                if (totEspTorasEl) totEspTorasEl.innerText = totToras;
-                if (totEspLiqEl) totEspLiqEl.innerText = totLiq.toLocaleString('pt-BR', { minimumFractionDigits: 3 }) + ' m³';
-                if (totEspBrutoEl) totEspBrutoEl.innerText = totBruto.toLocaleString('pt-BR', { minimumFractionDigits: 3 }) + ' m³';
-
-                espContainer.style.display = 'block';
-            } else {
-                espContainer.style.display = 'none';
-            }
+        const chkAll = document.getElementById('rel-forn-select-all');
+        if (chkAll) {
+            chkAll.checked = true;
+            chkAll.indeterminate = false;
         }
-
-        document.getElementById('tot-forn-rom').innerText = totRom;
-        document.getElementById('tot-forn-toras').innerText = totToras;
-        document.getElementById('tot-forn-liq').innerText = totLiq.toLocaleString('pt-BR', { minimumFractionDigits: 3 }) + ' m³';
-        document.getElementById('tot-forn-bruto').innerText = totBruto.toLocaleString('pt-BR', { minimumFractionDigits: 3 }) + ' m³';
-        document.getElementById('tot-forn-frete').innerText = 'R$ ' + totFrete.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
         container.style.display = 'block';
         resumo.style.display = 'flex';
+
+        atualizarTotaisRelatorioFornecedor();
 
         if (window.lucide) window.lucide.createIcons();
 
@@ -5196,25 +5166,216 @@ async function gerarRelatorioFornecedor() {
     }
 }
 
+function selecionarTodosRomaneiosFornecedor(marcar) {
+    const chks = document.querySelectorAll('.chk-rel-forn-romaneio');
+    chks.forEach(chk => {
+        chk.checked = !!marcar;
+    });
+    const chkAll = document.getElementById('rel-forn-select-all');
+    if (chkAll) {
+        chkAll.checked = !!marcar;
+        chkAll.indeterminate = false;
+    }
+    atualizarTotaisRelatorioFornecedor();
+}
+
+function atualizarTotaisRelatorioFornecedor() {
+    if (!relatorioFornecedorDadosAtuais || !relatorioFornecedorDadosAtuais.romaneios) return;
+
+    const chks = document.querySelectorAll('.chk-rel-forn-romaneio');
+    const totalRom = chks.length;
+    let selecionadosCount = 0;
+    const idsSelecionados = new Set();
+
+    chks.forEach(chk => {
+        const id = parseInt(chk.value, 10);
+        const tr = document.getElementById(`rel-forn-tr-${id}`);
+        if (chk.checked) {
+            selecionadosCount++;
+            idsSelecionados.add(id);
+            if (tr) {
+                tr.style.opacity = '1.0';
+                tr.style.backgroundColor = '';
+            }
+        } else {
+            if (tr) {
+                tr.style.opacity = '0.40';
+                tr.style.backgroundColor = 'var(--input-bg, rgba(0, 0, 0, 0.03))';
+            }
+        }
+    });
+
+    const chkAll = document.getElementById('rel-forn-select-all');
+    if (chkAll) {
+        if (selecionadosCount === 0) {
+            chkAll.checked = false;
+            chkAll.indeterminate = false;
+        } else if (selecionadosCount === totalRom) {
+            chkAll.checked = true;
+            chkAll.indeterminate = false;
+        } else {
+            chkAll.checked = false;
+            chkAll.indeterminate = true;
+        }
+    }
+
+    const infoEl = document.getElementById('rel-forn-selecionados-info');
+    if (infoEl) {
+        if (selecionadosCount === totalRom) {
+            infoEl.innerHTML = `<span style="color: #10b981; font-weight: 700;">✓ ${totalRom} de ${totalRom} romaneios selecionados (Todos)</span>`;
+        } else if (selecionadosCount === 0) {
+            infoEl.innerHTML = `<span style="color: #ef4444; font-weight: 700;">⚠ Nenhum romaneio selecionado (0 de ${totalRom})</span>`;
+        } else {
+            infoEl.innerHTML = `<span style="color: #6366f1; font-weight: 700;">ℹ ${selecionadosCount} de ${totalRom} romaneios selecionados para acerto</span>`;
+        }
+    }
+
+    let totToras = 0;
+    let totLiq = 0;
+    let totBruto = 0;
+    let totFrete = 0;
+
+    const romaneiosSelecionados = relatorioFornecedorDadosAtuais.romaneios.filter(r => idsSelecionados.has(r.id));
+    romaneiosSelecionados.forEach(r => {
+        totToras += r.total_toras || 0;
+        totLiq += r.vol_liquido || 0;
+        totBruto += r.vol_bruto || 0;
+        totFrete += r.frete_total || 0;
+    });
+
+    const totRomEl = document.getElementById('tot-forn-rom');
+    const totTorasEl = document.getElementById('tot-forn-toras');
+    const totLiqEl = document.getElementById('tot-forn-liq');
+    const totBrutoEl = document.getElementById('tot-forn-bruto');
+    const totFreteEl = document.getElementById('tot-forn-frete');
+
+    if (totRomEl) {
+        totRomEl.innerText = selecionadosCount === totalRom ? `${totalRom}` : `${selecionadosCount} de ${totalRom}`;
+    }
+    if (totTorasEl) totTorasEl.innerText = totToras;
+    if (totLiqEl) totLiqEl.innerText = totLiq.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) + ' m³';
+    if (totBrutoEl) totBrutoEl.innerText = totBruto.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) + ' m³';
+    if (totFreteEl) totFreteEl.innerText = 'R$ ' + Number(totFrete).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    const espContainer = document.getElementById('rel-forn-especies-container');
+    const espTbody = document.getElementById('rel-forn-especies-corpo');
+    const espBadge = document.getElementById('rel-forn-especies-badge');
+
+    if (espContainer && espTbody) {
+        if (selecionadosCount === 0) {
+            espTbody.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 18px; color: var(--text-muted);">Nenhum romaneio selecionado.</td></tr>`;
+            if (espBadge) espBadge.innerText = '0 espécies';
+            const totEspTorasEl = document.getElementById('rel-forn-esp-tot-toras');
+            const totEspLiqEl = document.getElementById('rel-forn-esp-tot-liq');
+            const totEspBrutoEl = document.getElementById('rel-forn-esp-tot-bruto');
+            if (totEspTorasEl) totEspTorasEl.innerText = '0';
+            if (totEspLiqEl) totEspLiqEl.innerText = '0,000 m³';
+            if (totEspBrutoEl) totEspBrutoEl.innerText = '0,000 m³';
+            espContainer.style.display = 'block';
+            return;
+        }
+
+        const mapaEsp = new Map();
+        (relatorioFornecedorDadosAtuais.especiesPorRomaneio || []).forEach(item => {
+            if (!idsSelecionados.has(item.romaneio_id)) return;
+            const chave = item.especie_nome || 'Indefinida';
+            if (!mapaEsp.has(chave)) {
+                mapaEsp.set(chave, {
+                    especie_nome: chave,
+                    total_toras: 0,
+                    vol_liquido: 0,
+                    vol_bruto: 0
+                });
+            }
+            const reg = mapaEsp.get(chave);
+            reg.total_toras += item.total_toras || 0;
+            reg.vol_liquido += item.vol_liquido || 0;
+            reg.vol_bruto += item.vol_bruto || 0;
+        });
+
+        const listaEspecies = Array.from(mapaEsp.values());
+        listaEspecies.sort((a, b) => b.vol_liquido - a.vol_liquido || a.especie_nome.localeCompare(b.especie_nome));
+
+        if (listaEspecies.length > 0) {
+            if (espBadge) {
+                espBadge.innerText = `${listaEspecies.length} ${listaEspecies.length === 1 ? 'espécie' : 'espécies'}`;
+            }
+            espTbody.innerHTML = listaEspecies.map(esp => {
+                const pct = totLiq > 0 ? ((esp.vol_liquido / totLiq) * 100).toFixed(1).replace('.', ',') + '%' : '0,0%';
+                return `
+                    <tr>
+                        <td><b>${esp.especie_nome}</b></td>
+                        <td style="text-align: center;">${esp.total_toras}</td>
+                        <td style="text-align: center; color: #10b981; font-weight: 700;">${Number(esp.vol_liquido).toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} m³</td>
+                        <td style="text-align: center; color: #0284c7; font-weight: 600;">${Number(esp.vol_bruto).toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} m³</td>
+                        <td style="text-align: right; padding-right: 20px; font-weight: 600; color: var(--text-dark);">${pct}</td>
+                    </tr>
+                `;
+            }).join('');
+
+            const totEspTorasEl = document.getElementById('rel-forn-esp-tot-toras');
+            const totEspLiqEl = document.getElementById('rel-forn-esp-tot-liq');
+            const totEspBrutoEl = document.getElementById('rel-forn-esp-tot-bruto');
+            if (totEspTorasEl) totEspTorasEl.innerText = totToras;
+            if (totEspLiqEl) totEspLiqEl.innerText = totLiq.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) + ' m³';
+            if (totEspBrutoEl) totEspBrutoEl.innerText = totBruto.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) + ' m³';
+
+            espContainer.style.display = 'block';
+        } else {
+            espContainer.style.display = 'none';
+        }
+    }
+}
+
 async function exportarRelatorioFornecedorPDF() {
     const fornSelect = document.getElementById('rel-forn-id');
     const fornNome = fornSelect.options[fornSelect.selectedIndex].text;
-    const fornId = fornSelect.value;
     const dataInicio = document.getElementById('rel-forn-inicio').value;
     const dataFim = document.getElementById('rel-forn-fim').value;
     const romaneioInicio = document.getElementById('rel-forn-rom-inicio').value.trim();
     const romaneioFim = document.getElementById('rel-forn-rom-fim').value.trim();
 
     try {
-        const filtros = { fornecedorId: fornId, dataInicio, dataFim, romaneioInicio, romaneioFim };
-        const res = await window.api.invoke('relatorio-entradas-fornecedor', filtros);
-        const dados = Array.isArray(res) ? res : (res && res.romaneios ? res.romaneios : []);
-        const resumoEspecies = (res && res.resumoEspecies) ? res.resumoEspecies : [];
+        const container = document.getElementById('rel-forn-tabela-container');
+        if (!relatorioFornecedorDadosAtuais || container.style.display === 'none') {
+            await gerarRelatorioFornecedor();
+        }
 
-        if (!dados || dados.length === 0) {
+        if (!relatorioFornecedorDadosAtuais || !relatorioFornecedorDadosAtuais.romaneios || relatorioFornecedorDadosAtuais.romaneios.length === 0) {
             Swal.fire('Aviso', 'Não há dados para exportar.', 'warning');
             return;
         }
+
+        const chks = document.querySelectorAll('.chk-rel-forn-romaneio:checked');
+        if (chks.length === 0) {
+            Swal.fire('Atenção', 'Nenhum romaneio selecionado. Por favor, marque ao menos um romaneio para gerar o PDF do acerto.', 'warning');
+            return;
+        }
+
+        const idsSelecionados = new Set(Array.from(chks).map(c => parseInt(c.value, 10)));
+        const dados = relatorioFornecedorDadosAtuais.romaneios.filter(r => idsSelecionados.has(r.id));
+        const totalOriginal = relatorioFornecedorDadosAtuais.romaneios.length;
+
+        // Metragem cúbica das espécies dos romaneios selecionados
+        const mapaEsp = new Map();
+        (relatorioFornecedorDadosAtuais.especiesPorRomaneio || []).forEach(item => {
+            if (!idsSelecionados.has(item.romaneio_id)) return;
+            const chave = item.especie_nome || 'Indefinida';
+            if (!mapaEsp.has(chave)) {
+                mapaEsp.set(chave, {
+                    especie_nome: chave,
+                    total_toras: 0,
+                    vol_liquido: 0,
+                    vol_bruto: 0
+                });
+            }
+            const reg = mapaEsp.get(chave);
+            reg.total_toras += item.total_toras || 0;
+            reg.vol_liquido += item.vol_liquido || 0;
+            reg.vol_bruto += item.vol_bruto || 0;
+        });
+        const resumoEspecies = Array.from(mapaEsp.values());
+        resumoEspecies.sort((a, b) => b.vol_liquido - a.vol_liquido || a.especie_nome.localeCompare(b.especie_nome));
 
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF('p', 'mm', 'a4');
@@ -5241,10 +5402,15 @@ async function exportarRelatorioFornecedorPDF() {
 
         doc.setFontSize(7.5); doc.setFont("helvetica", "normal"); doc.setTextColor(100, 116, 139);
         doc.text(`Período: ${dataInicio ? new Date(dataInicio+'T00:00:00').toLocaleDateString('pt-BR') : 'Todos'} até ${dataFim ? new Date(dataFim+'T00:00:00').toLocaleDateString('pt-BR') : 'Hoje'}`, 14, 29.5);
+        
+        let linhaAtualY = 33.5;
         if (romaneioInicio || romaneioFim) {
-            doc.text(`Filtro Romaneios: De ${romaneioInicio || 'Início'} até ${romaneioFim || 'Fim'}`, 14, 33.5);
+            doc.text(`Filtro Romaneios: De ${romaneioInicio || 'Início'} até ${romaneioFim || 'Fim'}`, 14, linhaAtualY);
+            linhaAtualY += 4;
         }
-        doc.text(`Emissão: ${new Date().toLocaleString('pt-BR')}`, 14, (romaneioInicio || romaneioFim) ? 37.5 : 33.5);
+
+        doc.text(`Emissão: ${new Date().toLocaleString('pt-BR')}`, 14, linhaAtualY);
+        linhaAtualY += 4;
 
         let totToras = 0;
         let totLiq = 0;
@@ -5252,23 +5418,23 @@ async function exportarRelatorioFornecedorPDF() {
         let totFrete = 0;
 
         const linhas = dados.map(r => {
-            totToras += r.total_toras;
-            totLiq += r.vol_liquido;
-            totBruto += r.vol_bruto;
-            totFrete += r.frete_total;
+            totToras += r.total_toras || 0;
+            totLiq += r.vol_liquido || 0;
+            totBruto += r.vol_bruto || 0;
+            totFrete += r.frete_total || 0;
             return [
                 r.numero,
                 new Date(r.data + 'T00:00:00').toLocaleDateString('pt-BR'),
                 r.fornecedor_nome || '---',
-                r.total_toras.toString(),
-                Number(r.vol_liquido).toFixed(3),
-                Number(r.vol_bruto).toFixed(3),
-                'R$ ' + Number(r.frete_total).toFixed(2)
+                (r.total_toras || 0).toString(),
+                Number(r.vol_liquido || 0).toFixed(3),
+                Number(r.vol_bruto || 0).toFixed(3),
+                'R$ ' + Number(r.frete_total || 0).toFixed(2)
             ];
         });
 
         doc.autoTable({
-            startY: (romaneioInicio || romaneioFim) ? 41 : 37,
+            startY: linhaAtualY,
             head: [["Romaneio", "Data", "Fornecedor", "Toras", "Vol. Líq (m³)", "Vol. Bruto (m³)", "Frete Total"]],
             body: linhas,
             theme: 'grid',
@@ -5342,10 +5508,16 @@ function limparRelatorioFornecedor() {
     document.getElementById('rel-forn-fim').value = '';
     document.getElementById('rel-forn-rom-inicio').value = '';
     document.getElementById('rel-forn-rom-fim').value = '';
+    relatorioFornecedorDadosAtuais = null;
     document.getElementById('rel-forn-tabela-container').style.display = 'none';
     const espContainer = document.getElementById('rel-forn-especies-container');
     if (espContainer) espContainer.style.display = 'none';
     document.getElementById('rel-forn-resumo').style.display = 'none';
+    const chkAll = document.getElementById('rel-forn-select-all');
+    if (chkAll) {
+        chkAll.checked = true;
+        chkAll.indeterminate = false;
+    }
 }
 
 async function gerarRelatorioMotorista() {

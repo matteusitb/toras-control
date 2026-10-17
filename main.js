@@ -1892,46 +1892,62 @@ protectedHandle('relatorio-entradas-fornecedor', async (event, filtros) => {
         sql += " GROUP BY r.id ORDER BY r.data DESC, r.id DESC";
         const romaneios = db.prepare(sql).all(...params);
 
-        let sqlEspecies = `
-            SELECT IFNULL(e.nome, 'Indefinida') as especie_nome,
-                   COUNT(t.id) as total_toras,
-                   IFNULL(SUM(t.volume), 0) as vol_liquido,
-                   IFNULL(SUM(t.volume_bruto), 0) as vol_bruto
+        let sqlEspeciesBase = `
             FROM toras t
             INNER JOIN romaneios r ON t.romaneio_id = r.id
             LEFT JOIN especies e ON t.especie_id = e.id
             WHERE 1=1
         `;
+        let whereEspecies = "";
         const paramsEspecies = [];
         if (filtros.fornecedorId && filtros.fornecedorId !== 'todos') {
-            sqlEspecies += " AND r.fornecedor_id = ?";
+            whereEspecies += " AND r.fornecedor_id = ?";
             paramsEspecies.push(filtros.fornecedorId);
         }
         if (filtros.dataInicio && filtros.dataFim) {
-            sqlEspecies += " AND r.data BETWEEN ? AND ?";
+            whereEspecies += " AND r.data BETWEEN ? AND ?";
             paramsEspecies.push(filtros.dataInicio, filtros.dataFim);
         }
         if (filtros.romaneioInicio) {
             const valInicio = parseRomaneioParaOrdenacao(filtros.romaneioInicio);
             if (valInicio !== null) {
-                sqlEspecies += " AND (CAST(SUBSTR(r.numero, -4) AS INTEGER) * 100000 + CAST(SUBSTR(REPLACE(r.numero, 'ROM-', ''), 1, INSTR(REPLACE(r.numero, 'ROM-', ''), '/') - 1) AS INTEGER)) >= ?";
+                whereEspecies += " AND (CAST(SUBSTR(r.numero, -4) AS INTEGER) * 100000 + CAST(SUBSTR(REPLACE(r.numero, 'ROM-', ''), 1, INSTR(REPLACE(r.numero, 'ROM-', ''), '/') - 1) AS INTEGER)) >= ?";
                 paramsEspecies.push(valInicio);
             }
         }
         if (filtros.romaneioFim) {
             const valFim = parseRomaneioParaOrdenacao(filtros.romaneioFim);
             if (valFim !== null) {
-                sqlEspecies += " AND (CAST(SUBSTR(r.numero, -4) AS INTEGER) * 100000 + CAST(SUBSTR(REPLACE(r.numero, 'ROM-', ''), 1, INSTR(REPLACE(r.numero, 'ROM-', ''), '/') - 1) AS INTEGER)) <= ?";
+                whereEspecies += " AND (CAST(SUBSTR(r.numero, -4) AS INTEGER) * 100000 + CAST(SUBSTR(REPLACE(r.numero, 'ROM-', ''), 1, INSTR(REPLACE(r.numero, 'ROM-', ''), '/') - 1) AS INTEGER)) <= ?";
                 paramsEspecies.push(valFim);
             }
         }
-        sqlEspecies += " GROUP BY IFNULL(e.nome, 'Indefinida') ORDER BY vol_liquido DESC, e.nome ASC";
+        const sqlEspecies = `
+            SELECT IFNULL(e.nome, 'Indefinida') as especie_nome,
+                   COUNT(t.id) as total_toras,
+                   IFNULL(SUM(t.volume), 0) as vol_liquido,
+                   IFNULL(SUM(t.volume_bruto), 0) as vol_bruto
+            ${sqlEspeciesBase} ${whereEspecies}
+            GROUP BY IFNULL(e.nome, 'Indefinida') ORDER BY vol_liquido DESC, e.nome ASC
+        `;
         const resumoEspecies = db.prepare(sqlEspecies).all(...paramsEspecies);
 
-        return { romaneios, resumoEspecies };
+        const sqlEspeciesPorRomaneio = `
+            SELECT t.romaneio_id,
+                   IFNULL(e.nome, 'Indefinida') as especie_nome,
+                   COUNT(t.id) as total_toras,
+                   IFNULL(SUM(t.volume), 0) as vol_liquido,
+                   IFNULL(SUM(t.volume_bruto), 0) as vol_bruto
+            ${sqlEspeciesBase} ${whereEspecies}
+            GROUP BY t.romaneio_id, IFNULL(e.nome, 'Indefinida')
+            ORDER BY vol_liquido DESC
+        `;
+        const especiesPorRomaneio = db.prepare(sqlEspeciesPorRomaneio).all(...paramsEspecies);
+
+        return { romaneios, resumoEspecies, especiesPorRomaneio };
     } catch (err) {
         console.error("Erro relatorio-entradas-fornecedor:", err);
-        return { romaneios: [], resumoEspecies: [] };
+        return { romaneios: [], resumoEspecies: [], especiesPorRomaneio: [] };
     }
 });
 

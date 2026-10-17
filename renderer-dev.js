@@ -315,42 +315,50 @@ function limparFormularioTora() {
 // 1. MÁSCARAS E UTILITÁRIOS
 // 1. Formatação em tempo real (Máscara)
 function mascaraComprimento(input) {
-    let value = input.value.replace(/\D/g, '');
+    let raw = input.value;
+    if (!raw) return;
 
-    // Se o usuário apagar tudo, limpa o campo
-    if (value === "") {
-        input.value = "";
-        return;
+    if (raw.includes('.') && raw.includes(',')) {
+        raw = raw.replace(/\./g, '');
     }
 
-    // Aplica a vírgula conforme o usuário digita
-    if (value.length > 2) {
-        value = value.slice(0, -2) + ',' + value.slice(-2);
+    let hasExplicitComma = false;
+    let parts = raw.replace('.', ',').split(',');
+    if (parts.length > 1) {
+        let dec = parts.slice(1).join('').replace(/\D/g, '');
+        if (dec.length <= 2) {
+            hasExplicitComma = true;
+        }
     }
 
-    input.value = value;
+    if (hasExplicitComma) {
+        let int = parts[0].replace(/\D/g, '') || '0';
+        let dec = parts.slice(1).join('').replace(/\D/g, '').slice(0, 2);
+        int = int.replace(/^0+(?=\d)/, '');
+        if (!int) int = '0';
+        input.value = int + ',' + dec;
+    } else {
+        let digits = raw.replace(/\D/g, '');
+        if (!digits) { input.value = ''; return; }
+        if (digits.length > 2) {
+            let int = digits.slice(0, -2);
+            let dec = digits.slice(-2);
+            int = int.replace(/^0+(?=\d)/, '') || '0';
+            input.value = int + ',' + dec;
+        } else {
+            input.value = digits;
+        }
+    }
 }
 
 // 2. Ajuste Final (Garante as duas casas decimais ao sair do campo)
 function finalizarComprimento(input) {
-    let value = input.value.replace(/\D/g, '');
-
-    if (value === "") return;
-
-    // Se digitou apenas '5', vira '500' -> '5,00'
-    // Se digitou '55', vira '550' -> '5,50'
-    if (value.length === 1) value = value + "00";
-    if (value.length === 2) value = value + "0";
-
-    // Re-aplica a vírgula para garantir o formato final
-    if (value.length >= 3) {
-        value = value.slice(0, -2) + ',' + value.slice(-2);
-    } else {
-        // Caso de segurança para valores muito pequenos
-        value = "0," + value.padStart(2, '0');
-    }
-
-    input.value = value;
+    let val = input.value.trim();
+    if (!val) return;
+    val = val.replace(/\./g, '').replace(',', '.');
+    let num = parseFloat(val);
+    if (isNaN(num)) { input.value = ''; return; }
+    input.value = num.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function aplicarMascaraNumero(input) {
@@ -366,16 +374,12 @@ function obterValorLimpo(id) {
 }
 
 function mascaraFrete(input) {
-    let value = input.value.replace(/\D/g, '');
-    if (value === "") {
-        input.value = "";
-        calcularFreteRomaneio();
-        return;
-    }
-    if (value.length > 2) {
-        value = value.slice(0, -2) + ',' + value.slice(-2);
-    }
-    input.value = value;
+    mascaraMoeda(input);
+    calcularFreteRomaneio();
+}
+
+function finalizarFrete(input) {
+    finalizarMoeda(input);
     calcularFreteRomaneio();
 }
 
@@ -4366,6 +4370,182 @@ function fecharDetalhesRomaneio() {
 }
 
 /**
+ * Abre o modal flutuante de detalhes de um romaneio específico a partir de qualquer tela (ex: Relatórios).
+ */
+async function abrirModalDetalhesRomaneio(romaneioId) {
+    const modal = document.getElementById('modal-detalhes-romaneio');
+    const tbodyToras = document.getElementById('modal-rom-toras');
+    const divResumo = document.getElementById('modal-rom-resumo');
+    const divTotais = document.getElementById('modal-rom-totais');
+
+    if (!modal) return;
+
+    modal.style.display = 'flex';
+    tbodyToras.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:20px;">Carregando dados do romaneio...</td></tr>';
+    if (divResumo) divResumo.innerHTML = '';
+    if (divTotais) divTotais.innerHTML = '';
+
+    try {
+        const res = await window.api.invoke('get-romaneio-detalhado', romaneioId);
+        if (!res || !res.success) {
+            tbodyToras.innerHTML = '<tr><td colspan="7" style="color:#ef4444; text-align:center; padding:20px;">Erro ao carregar dados do romaneio.</td></tr>';
+            return;
+        }
+
+        const { romaneio, toras } = res;
+        romaneioAtualDetalhes = res;
+
+        // Cabeçalho do modal
+        const tituloEl = document.getElementById('modal-rom-titulo');
+        const infoEl = document.getElementById('modal-rom-info');
+        if (tituloEl) tituloEl.innerText = `Romaneio Nº ${romaneio.numero}`;
+        const dataFmt = romaneio.data ? romaneio.data.split('-').reverse().join('/') : '---';
+        if (infoEl) {
+            infoEl.innerText = `Data: ${dataFmt}  |  Fornecedor: ${romaneio.fornecedor_nome || romaneio.fornecedor || '---'}  |  Motorista: ${romaneio.motorista_nome || romaneio.motorista || '---'}`;
+        }
+
+        // ---- TABELA DE TORAS ----
+        let totalLiquido = 0;
+        let totalBruto = 0;
+        let totalOco = 0;
+        let qtdComOco = 0;
+        const resumoPorEspecie = {};
+
+        tbodyToras.innerHTML = toras.map(t => {
+            const volLiq = Number(t.volume) || 0;
+            const volBruto = t.volume_bruto || calcularVolumeBruto(Number(t.rodo) || 0, Number(t.comprimento) || 0, t.especie_nome);
+            const volOco = (t.total_desconto !== undefined && t.total_desconto !== null && t.total_desconto > 0)
+                ? Number(t.total_desconto)
+                : ((t.desconto_1 > 0 || t.desconto_2 > 0) && t.comprimento > 0
+                    ? Math.floor(((Number(t.desconto_1 || 0) * Number(t.desconto_2 || 0) * Number(t.comprimento || 0)) / 10000) * 1000) / 1000
+                    : 0);
+
+            totalLiquido += volLiq;
+            totalBruto += volBruto;
+            totalOco += volOco;
+            if (t.desconto_1 > 0 || t.desconto_2 > 0) qtdComOco++;
+
+            // Acumula resumo por espécie
+            const esp = t.especie_nome || 'Indefinida';
+            if (!resumoPorEspecie[esp]) resumoPorEspecie[esp] = { qtd: 0, liquido: 0, bruto: 0, oco: 0, isEspecial: false };
+            resumoPorEspecie[esp].qtd++;
+            resumoPorEspecie[esp].liquido += volLiq;
+            resumoPorEspecie[esp].bruto += volBruto;
+            resumoPorEspecie[esp].oco += volOco;
+
+            // Verifica se é espécie especial para exibir nota
+            const nomeNorm = (t.especie_nome || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+            if (nomeNorm.includes('jatob') || nomeNorm.includes('muiracatiara')) {
+                resumoPorEspecie[esp].isEspecial = true;
+            }
+
+            const rodoBruto = t.rodo_bruto || (t.rodo + (resumoPorEspecie[esp].isEspecial ? 20 : 10));
+            const compBruto = t.comprimento_bruto || (t.comprimento + 0.10);
+
+            const compLiqFmt = Number(t.comprimento || 0).toFixed(2).replace('.', ',');
+            const compBrutoFmt = Number(compBruto || 0).toFixed(2).replace('.', ',');
+
+            let ocoDisplay = '';
+            if (t.desconto_1 > 0 || t.desconto_2 > 0) {
+                const volOcoFmt = volOco.toFixed(3).replace('.', ',');
+                ocoDisplay = `<div style="color:#e11d48; font-size:0.78rem; font-weight:700; margin-top:3px;">Oco: ${t.desconto_1}×${t.desconto_2} (-${volOcoFmt} m³)</div>`;
+            }
+
+            const statusClass = t.status === 'pátio' ? 'status-patio' : 'status-serrada';
+            const statusTexto = t.status === 'pátio' ? 'PÁTIO' : 'SERRADA';
+
+            return `
+                <tr>
+                    <td><span class="badge-numero">${t.codigo}</span></td>
+                    <td><strong>${t.especie_nome || '---'}</strong></td>
+                    <td><span class="badge-count" style="background:#e0f2fe; color:#0369a1;">${t.lote_numero || '---'}</span></td>
+                    <td style="text-align:left; padding-left:15px;">
+                        <div style="font-weight:600; color:var(--text-dark, #0f172a);">Líq: ${t.rodo} cm × ${compLiqFmt} m</div>
+                        <div style="font-size:0.8rem; color:#64748b;">Bruto: ${rodoBruto} cm × ${compBrutoFmt} m</div>
+                        ${ocoDisplay}
+                    </td>
+                    <td style="text-align:center; font-weight:bold; color:#10b981;">${volLiq.toFixed(3).replace('.', ',')}</td>
+                    <td style="text-align:center; font-weight:bold; color:#0284c7;">${volBruto.toFixed(3).replace('.', ',')}</td>
+                    <td style="text-align:center;"><span class="status-tag ${statusClass}">${statusTexto}</span></td>
+                </tr>`;
+        }).join('');
+
+        // ---- RESUMO POR ESPÉCIE ----
+        if (divResumo) {
+            divResumo.innerHTML = `
+                <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; margin-top:10px;">
+                    ${Object.entries(resumoPorEspecie).map(([nome, d]) => `
+                        <div style="background: var(--bg-card, #f8fafc); border:1px solid #e2e8f0; border-left: 5px solid #0284c7; border-radius:10px; padding:14px;">
+                            <div style="font-weight:700; color:#0f172a; margin-bottom:6px;">${nome} ${d.isEspecial ? '<span style="font-size:0.7rem; background:#fef9c3; color:#854d0e; padding:2px 6px; border-radius:4px; margin-left:4px;">+20cm rodo</span>' : ''}</div>
+                            <div style="font-size:0.85rem; color:#475569;">${d.qtd} tora${d.qtd !== 1 ? 's' : ''}</div>
+                            <div style="display:flex; gap:14px; margin-top:6px; font-size:0.88rem; flex-wrap: wrap;">
+                                <div><span style="color:#64748b;">Líquido:</span> <strong>${d.liquido.toFixed(3).replace('.', ',')} m³</strong></div>
+                                <div><span style="color:#0284c7;">Bruto:</span> <strong style="color:#0284c7;">${d.bruto.toFixed(3).replace('.', ',')} m³</strong></div>
+                                ${d.oco > 0 ? `<div><span style="color:#e11d48;">Oco:</span> <strong style="color:#e11d48;">-${d.oco.toFixed(3).replace('.', ',')} m³</strong></div>` : ''}
+                            </div>
+                        </div>`).join('')}
+                </div>`;
+        }
+
+        // ---- TOTAIS RODAPÉ ----
+        if (divTotais) {
+            divTotais.innerHTML = `
+                <div style="display:flex; gap:25px; justify-content:flex-end; padding: 15px 0; border-top: 2px solid #e2e8f0; flex-wrap: wrap;">
+                    <div style="text-align:right;">
+                        <div style="font-size:0.8rem; color:#64748b; text-transform:uppercase; letter-spacing:0.05em;">Total Líquido</div>
+                        <div style="font-size:1.3rem; font-weight:800; color:#10b981;">${totalLiquido.toFixed(3).replace('.', ',')} m³</div>
+                        <div style="font-size:0.8rem; color:#94a3b8;">${toras.length} toras</div>
+                    </div>
+                    <div style="text-align:right;">
+                        <div style="font-size:0.8rem; color:#64748b; text-transform:uppercase; letter-spacing:0.05em;">Total Bruto</div>
+                        <div style="font-size:1.3rem; font-weight:800; color:#0284c7;">${totalBruto.toFixed(3).replace('.', ',')} m³</div>
+                    </div>
+                    <div style="text-align:right;">
+                        <div style="font-size:0.8rem; color:#64748b; text-transform:uppercase; letter-spacing:0.05em;">Total Desconto (Oco)</div>
+                        <div style="font-size:1.3rem; font-weight:800; color:#e11d48;">${totalOco > 0 ? `-${totalOco.toFixed(3).replace('.', ',')}` : '0,000'} m³</div>
+                        <div style="font-size:0.8rem; color:#94a3b8;">${qtdComOco} ${qtdComOco === 1 ? 'tora com oco' : 'toras com oco'}</div>
+                    </div>
+                    <div style="text-align:right;">
+                        <div style="font-size:0.8rem; color:#64748b; text-transform:uppercase; letter-spacing:0.05em;">Valor do Frete</div>
+                        <div style="font-size:1.3rem; font-weight:800; color:#6366f1;">R$ ${(romaneio.frete_valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / m³</div>
+                    </div>
+                    <div style="text-align:right;">
+                        <div style="font-size:0.8rem; color:#64748b; text-transform:uppercase; letter-spacing:0.05em;">Total do Frete (Bruto)</div>
+                        <div style="font-size:1.3rem; font-weight:800; color:#8b5cf6;">R$ ${(romaneio.frete_total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                    </div>
+                </div>`;
+        }
+
+        if (window.lucide) lucide.createIcons();
+
+    } catch (err) {
+        console.error('Erro ao abrir modal de detalhes do romaneio:', err);
+        tbodyToras.innerHTML = `<tr><td colspan="7" style="color:#ef4444; text-align:center; padding:20px;">Erro: ${tratarErroIpc(err)}</td></tr>`;
+    }
+}
+
+function fecharModalDetalhesRomaneio() {
+    const modal = document.getElementById('modal-detalhes-romaneio');
+    if (modal) modal.style.display = 'none';
+}
+
+// Fecha modal de detalhes do romaneio ao clicar no fundo ou na tecla Escape
+document.addEventListener('click', (e) => {
+    const modal = document.getElementById('modal-detalhes-romaneio');
+    if (modal && e.target === modal) {
+        fecharModalDetalhesRomaneio();
+    }
+});
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        const modal = document.getElementById('modal-detalhes-romaneio');
+        if (modal && modal.style.display === 'flex') {
+            fecharModalDetalhesRomaneio();
+        }
+    }
+});
+
+/**
  * Gera e imprime o PDF do romaneio atualmente aberto no painel de detalhes.
  */
 async function imprimirRomaneio() {
@@ -4915,15 +5095,22 @@ async function gerarRelatorioFornecedor() {
 
     try {
         const filtros = { fornecedorId: fornId, dataInicio, dataFim, romaneioInicio, romaneioFim };
-        const dados = await window.api.invoke('relatorio-entradas-fornecedor', filtros);
+        const res = await window.api.invoke('relatorio-entradas-fornecedor', filtros);
+
+        const dados = Array.isArray(res) ? res : (res && res.romaneios ? res.romaneios : []);
+        const resumoEspecies = (res && res.resumoEspecies) ? res.resumoEspecies : [];
 
         const tbody = document.getElementById('rel-forn-tabela-corpo');
         const container = document.getElementById('rel-forn-tabela-container');
         const resumo = document.getElementById('rel-forn-resumo');
+        const espContainer = document.getElementById('rel-forn-especies-container');
+        const espTbody = document.getElementById('rel-forn-especies-corpo');
+        const espBadge = document.getElementById('rel-forn-especies-badge');
 
         if (!dados || dados.length === 0) {
             tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 30px; color: var(--text-main);">Nenhum romaneio encontrado para este filtro.</td></tr>`;
             container.style.display = 'block';
+            if (espContainer) espContainer.style.display = 'none';
             resumo.style.display = 'none';
             return;
         }
@@ -4944,7 +5131,12 @@ async function gerarRelatorioFornecedor() {
             const dataFormat = new Date(r.data + 'T00:00:00').toLocaleDateString('pt-BR');
             tbody.innerHTML += `
                 <tr>
-                    <td><b>${r.numero}</b></td>
+                    <td>
+                        <a href="javascript:void(0)" onclick="abrirModalDetalhesRomaneio(${r.id})" style="color: var(--accent-color, #6366f1); font-weight: 700; text-decoration: underline; display: inline-flex; align-items: center; gap: 5px; cursor: pointer;" title="Visualizar dados do romaneio ${r.numero}">
+                            <i data-lucide="external-link" style="width: 14px; height: 14px;"></i>
+                            <b>${r.numero}</b>
+                        </a>
+                    </td>
                     <td>${dataFormat}</td>
                     <td>${r.fornecedor_nome || '---'}</td>
                     <td style="text-align: center;">${r.total_toras}</td>
@@ -4955,6 +5147,38 @@ async function gerarRelatorioFornecedor() {
             `;
         });
 
+        // Preenche resumo de metragem cúbica por espécie
+        if (espContainer && espTbody) {
+            if (resumoEspecies && resumoEspecies.length > 0) {
+                if (espBadge) {
+                    espBadge.innerText = `${resumoEspecies.length} ${resumoEspecies.length === 1 ? 'espécie' : 'espécies'}`;
+                }
+                espTbody.innerHTML = resumoEspecies.map(esp => {
+                    const pct = totLiq > 0 ? ((esp.vol_liquido / totLiq) * 100).toFixed(1).replace('.', ',') + '%' : '0,0%';
+                    return `
+                        <tr>
+                            <td><b>${esp.especie_nome}</b></td>
+                            <td style="text-align: center;">${esp.total_toras}</td>
+                            <td style="text-align: center; color: #10b981; font-weight: 700;">${Number(esp.vol_liquido).toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} m³</td>
+                            <td style="text-align: center; color: #0284c7; font-weight: 600;">${Number(esp.vol_bruto).toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} m³</td>
+                            <td style="text-align: right; padding-right: 20px; font-weight: 600; color: var(--text-dark);">${pct}</td>
+                        </tr>
+                    `;
+                }).join('');
+
+                const totEspTorasEl = document.getElementById('rel-forn-esp-tot-toras');
+                const totEspLiqEl = document.getElementById('rel-forn-esp-tot-liq');
+                const totEspBrutoEl = document.getElementById('rel-forn-esp-tot-bruto');
+                if (totEspTorasEl) totEspTorasEl.innerText = totToras;
+                if (totEspLiqEl) totEspLiqEl.innerText = totLiq.toLocaleString('pt-BR', { minimumFractionDigits: 3 }) + ' m³';
+                if (totEspBrutoEl) totEspBrutoEl.innerText = totBruto.toLocaleString('pt-BR', { minimumFractionDigits: 3 }) + ' m³';
+
+                espContainer.style.display = 'block';
+            } else {
+                espContainer.style.display = 'none';
+            }
+        }
+
         document.getElementById('tot-forn-rom').innerText = totRom;
         document.getElementById('tot-forn-toras').innerText = totToras;
         document.getElementById('tot-forn-liq').innerText = totLiq.toLocaleString('pt-BR', { minimumFractionDigits: 3 }) + ' m³';
@@ -4963,6 +5187,8 @@ async function gerarRelatorioFornecedor() {
 
         container.style.display = 'block';
         resumo.style.display = 'flex';
+
+        if (window.lucide) window.lucide.createIcons();
 
     } catch (err) {
         console.error("Erro gerarRelatorioFornecedor:", err);
@@ -4981,7 +5207,9 @@ async function exportarRelatorioFornecedorPDF() {
 
     try {
         const filtros = { fornecedorId: fornId, dataInicio, dataFim, romaneioInicio, romaneioFim };
-        const dados = await window.api.invoke('relatorio-entradas-fornecedor', filtros);
+        const res = await window.api.invoke('relatorio-entradas-fornecedor', filtros);
+        const dados = Array.isArray(res) ? res : (res && res.romaneios ? res.romaneios : []);
+        const resumoEspecies = (res && res.resumoEspecies) ? res.resumoEspecies : [];
 
         if (!dados || dados.length === 0) {
             Swal.fire('Aviso', 'Não há dados para exportar.', 'warning');
@@ -5033,8 +5261,8 @@ async function exportarRelatorioFornecedorPDF() {
                 new Date(r.data + 'T00:00:00').toLocaleDateString('pt-BR'),
                 r.fornecedor_nome || '---',
                 r.total_toras.toString(),
-                r.vol_liquido.toFixed(3),
-                r.vol_bruto.toFixed(3),
+                Number(r.vol_liquido).toFixed(3),
+                Number(r.vol_bruto).toFixed(3),
                 'R$ ' + Number(r.frete_total).toFixed(2)
             ];
         });
@@ -5046,16 +5274,58 @@ async function exportarRelatorioFornecedorPDF() {
             theme: 'grid',
             headStyles: { fillColor: [71, 85, 105], fontSize: 8, halign: 'center' },
             styles: { fontSize: 8, cellPadding: 2 },
-            columnStyles: { 0: { fontStyle: 'bold' }, 4: { halign: 'right' }, 5: { halign: 'right' }, 6: { halign: 'right' } }
+            columnStyles: { 0: { fontStyle: 'bold' }, 3: { halign: 'center' }, 4: { halign: 'right' }, 5: { halign: 'right' }, 6: { halign: 'right' } }
         });
 
-        let currentY = doc.lastAutoTable.finalY + 12;
-        doc.setFont("helvetica", "bold"); doc.setFontSize(10);
-        doc.text(`TOTAL ROMANEIOS: ${dados.length}`, 14, currentY);
-        doc.text(`TOTAL TORAS: ${totToras}`, 14, currentY + 6);
-        doc.text(`VOLUME LÍQUIDO TOTAL: ${totLiq.toFixed(3)} m³`, 14, currentY + 12);
-        doc.text(`VOLUME BRUTO TOTAL: ${totBruto.toFixed(3)} m³`, 14, currentY + 18);
-        doc.text(`TOTAL FRETE: R$ ${totFrete.toFixed(2)}`, 14, currentY + 24);
+        let nextY = doc.lastAutoTable.finalY + 9;
+
+        // Tabela de Metragem Cúbica por Espécie no PDF
+        if (resumoEspecies && resumoEspecies.length > 0) {
+            if (nextY > 240) {
+                doc.addPage();
+                nextY = 20;
+            }
+
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(9);
+            doc.setTextColor(30, 41, 59);
+            doc.text("TOTAL GERAL DE METRAGEM CÚBICA POR ESPÉCIE", 14, nextY);
+
+            const linhasEspecies = resumoEspecies.map(esp => {
+                const pct = totLiq > 0 ? ((esp.vol_liquido / totLiq) * 100).toFixed(1).replace('.', ',') + '%' : '0,0%';
+                return [
+                    esp.especie_nome || 'Indefinida',
+                    esp.total_toras.toString(),
+                    Number(esp.vol_liquido).toFixed(3),
+                    Number(esp.vol_bruto).toFixed(3),
+                    pct
+                ];
+            });
+
+            doc.autoTable({
+                startY: nextY + 3,
+                head: [["Espécie", "Toras", "Vol. Líquido (m³)", "Vol. Bruto (m³)", "Part. Líquida (%)"]],
+                body: linhasEspecies,
+                theme: 'grid',
+                headStyles: { fillColor: [16, 185, 129], fontSize: 8, halign: 'center' },
+                styles: { fontSize: 8, cellPadding: 2 },
+                columnStyles: { 0: { fontStyle: 'bold' }, 1: { halign: 'center' }, 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } }
+            });
+
+            nextY = doc.lastAutoTable.finalY + 9;
+        }
+
+        if (nextY > 250) {
+            doc.addPage();
+            nextY = 20;
+        }
+
+        doc.setFont("helvetica", "bold"); doc.setFontSize(9.5); doc.setTextColor(15, 23, 42);
+        doc.text(`TOTAL ROMANEIOS: ${dados.length}`, 14, nextY);
+        doc.text(`TOTAL TORAS: ${totToras}`, 14, nextY + 5.5);
+        doc.text(`VOLUME LÍQUIDO TOTAL: ${totLiq.toFixed(3)} m³`, 14, nextY + 11);
+        doc.text(`VOLUME BRUTO TOTAL: ${totBruto.toFixed(3)} m³`, 14, nextY + 16.5);
+        doc.text(`TOTAL FRETE: R$ ${totFrete.toFixed(2)}`, 14, nextY + 22);
 
         const fornNomeVal = (fornNome && fornNome !== 'Todos' && !fornNome.includes('Selecione')) ? fornNome : '';
         const nomeArquivoPDF = gerarNomeArquivoDataHora('Relatorio_Fornecedor', fornNomeVal);
@@ -5073,6 +5343,8 @@ function limparRelatorioFornecedor() {
     document.getElementById('rel-forn-rom-inicio').value = '';
     document.getElementById('rel-forn-rom-fim').value = '';
     document.getElementById('rel-forn-tabela-container').style.display = 'none';
+    const espContainer = document.getElementById('rel-forn-especies-container');
+    if (espContainer) espContainer.style.display = 'none';
     document.getElementById('rel-forn-resumo').style.display = 'none';
 }
 
@@ -5122,7 +5394,12 @@ async function gerarRelatorioMotorista() {
             const dataFormat = new Date(r.data + 'T00:00:00').toLocaleDateString('pt-BR');
             tbody.innerHTML += `
                 <tr>
-                    <td><b>${r.numero}</b></td>
+                    <td>
+                        <a href="javascript:void(0)" onclick="abrirModalDetalhesRomaneio(${r.id})" style="color: var(--accent-color, #6366f1); font-weight: 700; text-decoration: underline; display: inline-flex; align-items: center; gap: 5px; cursor: pointer;" title="Visualizar dados do romaneio ${r.numero}">
+                            <i data-lucide="external-link" style="width: 14px; height: 14px;"></i>
+                            <b>${r.numero}</b>
+                        </a>
+                    </td>
                     <td>${dataFormat}</td>
                     <td>${r.motorista_nome || '---'}</td>
                     <td style="text-align: center;">${r.total_toras}</td>
@@ -5142,6 +5419,8 @@ async function gerarRelatorioMotorista() {
 
         container.style.display = 'block';
         resumo.style.display = 'flex';
+
+        if (window.lucide) window.lucide.createIcons();
 
     } catch (err) {
         console.error("Erro gerarRelatorioMotorista:", err);
@@ -5264,6 +5543,8 @@ function limparRelatorioMotorista() {
 let previaFechamentoAtual = null; // Armazena os dados calculados da prévia
 
 // --- 1. CONTROLE DE ABAS ---
+let cacheMotoristasFechamento = [];
+
 function switchFechamentoTab(tabName, element) {
     // 1. Alterna classe ativa dos botões de abas
     const container = document.querySelector('#v-fechamentos .tabs-container');
@@ -5273,7 +5554,6 @@ function switchFechamentoTab(tabName, element) {
     if (element) {
         element.classList.add('active');
     } else {
-        // Se chamado via código sem elemento, procura pelo id
         const targetBtn = document.querySelector(`#v-fechamentos .tabs-container button[onclick*="${tabName}"]`);
         if (targetBtn) targetBtn.classList.add('active');
     }
@@ -5293,6 +5573,10 @@ function switchFechamentoTab(tabName, element) {
         resetFormVale();
         listarVales();
         carregarSelectsFechamentos();
+    } else if (tabName === 'avulsos') {
+        resetFormAvulso();
+        listarAvulsos();
+        carregarSelectsFechamentos();
     } else if (tabName === 'novo') {
         limparPreviaFechamento();
         carregarSelectsFechamentos();
@@ -5306,11 +5590,13 @@ function switchFechamentoTab(tabName, element) {
 async function carregarSelectsFechamentos() {
     const selectFech = document.getElementById('fech-motorista-id');
     const selectVale = document.getElementById('vale-motorista-id');
+    const selectAvulso = document.getElementById('avulso-motorista-id');
     
     try {
         const motoristas = await window.api.invoke('listar-motoristas');
+        cacheMotoristasFechamento = motoristas || [];
         const optionsHtml = '<option value="">Selecione o Motorista...</option>' +
-            (motoristas || []).map(m => `<option value="${m.id}">${m.nome}</option>`).join('');
+            cacheMotoristasFechamento.map(m => `<option value="${m.id}">${m.nome}</option>`).join('');
             
         if (selectFech) {
             const valSalvo = selectFech.value;
@@ -5322,27 +5608,62 @@ async function carregarSelectsFechamentos() {
             selectVale.innerHTML = optionsHtml;
             selectVale.value = valSalvo;
         }
+        if (selectAvulso) {
+            const valSalvo = selectAvulso.value;
+            selectAvulso.innerHTML = optionsHtml;
+            selectAvulso.value = valSalvo;
+        }
     } catch (e) {
         console.error("Erro ao carregar selects de fechamentos:", e);
     }
 }
 
-// --- 3. CONTROLE DE FILTROS ---
+// --- 3. CONTROLE DE FILTROS E SALÁRIO PROPORCIONAL ---
 function toggleTipoFiltroFechamento() {
     const tipo = document.getElementById('fech-tipo-filtro').value;
     const rowDatas = document.getElementById('row-filtro-datas');
     const rowRoms = document.getElementById('row-filtro-romaneios');
+    const rowSalarioProp = document.getElementById('row-opcao-salario-prop');
 
     if (tipo === 'datas') {
         rowDatas.style.display = 'flex';
         rowRoms.style.display = 'none';
+        if (rowSalarioProp) rowSalarioProp.style.display = 'flex';
         document.getElementById('fech-rom-inicio').value = '';
         document.getElementById('fech-rom-fim').value = '';
     } else {
         rowDatas.style.display = 'none';
         rowRoms.style.display = 'flex';
+        if (rowSalarioProp) rowSalarioProp.style.display = 'none';
         document.getElementById('fech-data-inicio').value = '';
         document.getElementById('fech-data-fim').value = '';
+    }
+}
+
+function toggleSalarioProporcional() {
+    const chk = document.getElementById('fech-salario-proporcional');
+    const container = document.getElementById('container-dias-prop');
+    if (container) {
+        container.style.display = chk.checked ? 'flex' : 'none';
+    }
+    atualizarDiasSalarioProporcional();
+}
+
+function atualizarDiasSalarioProporcional() {
+    const dtInicio = document.getElementById('fech-data-inicio').value;
+    const dtFim = document.getElementById('fech-data-fim').value;
+    const inputDias = document.getElementById('fech-dias-prop');
+    if (dtInicio && dtFim) {
+        const d1 = new Date(dtInicio + 'T00:00:00');
+        const d2 = new Date(dtFim + 'T00:00:00');
+        const diffTime = d2.getTime() - d1.getTime();
+        const diffDays = Math.round(diffTime / (1000 * 3600 * 24)) + 1;
+        if (inputDias) {
+            inputDias.value = diffDays > 0 ? diffDays : 1;
+        }
+    }
+    if (previaFechamentoAtual) {
+        recalcularTotalFechamentoPrevia();
     }
 }
 
@@ -5350,9 +5671,15 @@ function limparPreviaFechamento() {
     previaFechamentoAtual = null;
     document.getElementById('container-previa-fechamento').style.display = 'none';
     document.getElementById('fech-tabela-cargas').innerHTML = '';
+    const tbodyAvulsos = document.getElementById('fech-tabela-avulsos-previa');
+    if (tbodyAvulsos) tbodyAvulsos.innerHTML = '';
     document.getElementById('fech-tabela-vales-previa').innerHTML = '';
     document.getElementById('fech-observacoes').value = '';
+    const elProducao = document.getElementById('fech-resumo-producao-m3');
+    if (elProducao) elProducao.innerText = '0,000 m³';
     document.getElementById('fech-vales-select-all').checked = false;
+    const chkAvulsosAll = document.getElementById('fech-avulsos-select-all');
+    if (chkAvulsosAll) chkAvulsosAll.checked = false;
 }
 
 // --- 4. CÁLCULO E RENDERIZAÇÃO DA PRÉVIA ---
@@ -5374,6 +5701,11 @@ async function gerarPreviaFechamento() {
         }
         filtros.dataInicio = dataInicio;
         filtros.dataFim = dataFim;
+        
+        const chkProp = document.getElementById('fech-salario-proporcional');
+        filtros.salarioProporcional = chkProp && chkProp.checked;
+        const inputDias = document.getElementById('fech-dias-prop');
+        filtros.diasTrabalhados = inputDias ? parseInt(inputDias.value) || 30 : 30;
     } else {
         const romInicio = document.getElementById('fech-rom-inicio').value.trim();
         const romFim = document.getElementById('fech-rom-fim').value.trim();
@@ -5382,6 +5714,8 @@ async function gerarPreviaFechamento() {
         }
         filtros.romaneioInicio = romInicio;
         filtros.romaneioFim = romFim;
+        filtros.salarioProporcional = false;
+        filtros.diasTrabalhados = 30;
     }
 
     try {
@@ -5393,28 +5727,92 @@ async function gerarPreviaFechamento() {
             // 1. Exibe painel
             document.getElementById('container-previa-fechamento').style.display = 'block';
 
-            // 2. Preenche Resumos de Cargas
+            // 2. Preenche Resumos de Cargas Romaneios
             const tbodyCargas = document.getElementById('fech-tabela-cargas');
             if (res.cargas && res.cargas.length > 0) {
-                tbodyCargas.innerHTML = res.cargas.map(c => {
+                let somaToras = 0;
+                let somaVolBruto = 0;
+                let somaFreteTotal = 0;
+                let somaComissao = 0;
+
+                const linhas = res.cargas.map(c => {
                     const dataFmt = c.data ? c.data.split('-').reverse().join('/') : '---';
+                    const vol = Number(c.vol_bruto) || 0;
+                    somaToras += Number(c.total_toras) || 0;
+                    somaVolBruto += vol;
+                    somaFreteTotal += Number(c.frete_total) || 0;
+                    somaComissao += Number(c.valor_comissao) || 0;
+
                     return `
                         <tr>
                             <td><b>${c.numero}</b></td>
                             <td>${dataFmt}</td>
                             <td>${c.total_toras} toras</td>
-                            <td>${c.vol_bruto.toFixed(3)} m³</td>
+                            <td style="font-weight: 700; color: #0284c7;">${vol.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} m³</td>
                             <td>R$ ${(c.frete_valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                             <td>R$ ${(c.frete_total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                             <td style="color:#10b981; font-weight:700;">R$ ${(c.valor_comissao || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                         </tr>
                     `;
                 }).join('');
+
+                const linhaTotal = `
+                    <tr style="background: var(--bg-hover, #f8fafc); font-weight: 800; border-top: 2px solid var(--border-color);">
+                        <td colspan="2">TOTAL DOS ROMANEIOS (${res.cargas.length} cargas):</td>
+                        <td>${somaToras} toras</td>
+                        <td style="color: #0284c7;">${somaVolBruto.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} m³</td>
+                        <td>---</td>
+                        <td>R$ ${somaFreteTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        <td style="color:#10b981;">R$ ${somaComissao.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    </tr>
+                `;
+
+                tbodyCargas.innerHTML = linhas + linhaTotal;
             } else {
                 tbodyCargas.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:20px;" class="text-muted">Nenhum romaneio carregado para este intervalo.</td></tr>`;
             }
 
-            // 3. Preenche Resumos de Vales
+            // 3. Preenche Resumos de Lançamentos Avulsos e Baldeios
+            const tbodyAvulsos = document.getElementById('fech-tabela-avulsos-previa');
+            if (tbodyAvulsos) {
+                if (res.avulsos && res.avulsos.length > 0) {
+                    tbodyAvulsos.innerHTML = res.avulsos.map(a => {
+                        const dataFmt = a.data ? a.data.split('-').reverse().join('/') : '---';
+                        let tipoBadge = '<span style="background:var(--badge-neutral-bg, #f1f5f9); padding:2px 6px; border-radius:4px; font-weight:600;">Outros</span>';
+                        if (a.tipo === 'carga_avulsa') {
+                            tipoBadge = '<span style="background:#e0f2fe; color:#0284c7; padding:2px 6px; border-radius:4px; font-weight:600;">🚛 Carga Avulsa</span>';
+                        } else if (a.tipo === 'baldeio') {
+                            tipoBadge = '<span style="background:#fef3c7; color:#d97706; padding:2px 6px; border-radius:4px; font-weight:600;">🔄 Baldeio</span>';
+                        }
+                        const qtdFmt = a.qtd_carga ? a.qtd_carga.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) : '---';
+                        const freteUnitFmt = a.valor_frete_unitario ? `R$ ${a.valor_frete_unitario.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '---';
+                        const freteFmt = a.valor_frete ? `R$ ${a.valor_frete.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '---';
+
+                        return `
+                            <tr>
+                                <td style="text-align:center;">
+                                    <input type="checkbox" class="chk-avulso-fech" value="${a.id}" data-valor="${a.valor_comissao}" onchange="recalcularTotalFechamentoPrevia()" checked>
+                                </td>
+                                <td>${tipoBadge}</td>
+                                <td>${dataFmt}</td>
+                                <td>${qtdFmt}</td>
+                                <td>${freteUnitFmt}</td>
+                                <td>${freteFmt}</td>
+                                <td style="color:#10b981; font-weight:700;">+ R$ ${a.valor_comissao.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                <td>${a.descricao || 'Sem descrição'}</td>
+                            </tr>
+                        `;
+                    }).join('');
+                    const chkAll = document.getElementById('fech-avulsos-select-all');
+                    if (chkAll) chkAll.checked = true;
+                } else {
+                    tbodyAvulsos.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:20px;" class="text-muted">Nenhum lançamento avulso em aberto para este motorista.</td></tr>`;
+                    const chkAll = document.getElementById('fech-avulsos-select-all');
+                    if (chkAll) chkAll.checked = false;
+                }
+            }
+
+            // 4. Preenche Resumos de Vales
             const tbodyVales = document.getElementById('fech-tabela-vales-previa');
             if (res.vales && res.vales.length > 0) {
                 tbodyVales.innerHTML = res.vales.map(v => {
@@ -5425,7 +5823,7 @@ async function gerarPreviaFechamento() {
                                 <input type="checkbox" class="chk-vale-fech" value="${v.id}" data-valor="${v.valor}" onchange="recalcularTotalFechamentoPrevia()" checked>
                             </td>
                             <td>${dataFmt}</td>
-                            <td style="color:#ef4444; font-weight:700;">R$ ${v.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                            <td style="color:#ef4444; font-weight:700;">- R$ ${v.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                             <td>${v.descricao || 'Sem descrição'}</td>
                         </tr>
                     `;
@@ -5436,8 +5834,10 @@ async function gerarPreviaFechamento() {
                 document.getElementById('fech-vales-select-all').checked = false;
             }
 
-            // 4. Executa recálculo inicial (tudo selecionado)
+            // 5. Executa recálculo inicial (tudo selecionado)
             recalcularTotalFechamentoPrevia();
+
+            if (typeof lucide !== 'undefined') lucide.createIcons();
 
         } else {
             Swal.fire('Erro', tratarErroIpc(res.error), 'error');
@@ -5452,37 +5852,104 @@ function recalcularTotalFechamentoPrevia() {
     if (!previaFechamentoAtual) return;
 
     let somaValesDescontados = 0;
-    const checkboxes = document.querySelectorAll('.chk-vale-fech');
-    checkboxes.forEach(chk => {
+    const checkboxesVales = document.querySelectorAll('.chk-vale-fech');
+    checkboxesVales.forEach(chk => {
         if (chk.checked) {
             somaValesDescontados += parseFloat(chk.getAttribute('data-valor')) || 0;
         }
     });
 
-    const salario = previaFechamentoAtual.motorista.salario;
-    const comissoes = previaFechamentoAtual.totalComissao;
-    const saldoLiquido = salario + comissoes - somaValesDescontados;
+    let somaAvulsos = 0;
+    const checkboxesAvulsos = document.querySelectorAll('.chk-avulso-fech');
+    checkboxesAvulsos.forEach(chk => {
+        if (chk.checked) {
+            somaAvulsos += parseFloat(chk.getAttribute('data-valor')) || 0;
+        }
+    });
+
+    const salarioBase = previaFechamentoAtual.motorista.salario_base !== undefined ? previaFechamentoAtual.motorista.salario_base : (previaFechamentoAtual.motorista.salario || 0);
+    const chkProp = document.getElementById('fech-salario-proporcional');
+    const isProp = chkProp && chkProp.checked;
+    let salario = salarioBase;
+    let diasTrabalhados = 30;
+
+    if (isProp) {
+        const inputDias = document.getElementById('fech-dias-prop');
+        diasTrabalhados = inputDias ? parseInt(inputDias.value) || 30 : 30;
+        salario = Math.round(((salarioBase / 30) * diasTrabalhados) * 100) / 100;
+        const elSalarioTitulo = document.getElementById('fech-resumo-salario-titulo');
+        if (elSalarioTitulo) elSalarioTitulo.innerText = `Salário Prop. (${diasTrabalhados}d / 30)`;
+    } else {
+        const elSalarioTitulo = document.getElementById('fech-resumo-salario-titulo');
+        if (elSalarioTitulo) elSalarioTitulo.innerText = `Salário Integral`;
+    }
+
+    const comissoes = previaFechamentoAtual.totalComissao || 0;
+    const saldoLiquido = salario + comissoes + somaAvulsos - somaValesDescontados;
+
+    // Calcula Produção Total em m³ (Romaneios + Cargas Avulsas selecionadas)
+    let totalM3Romaneios = 0;
+    if (previaFechamentoAtual.cargas && previaFechamentoAtual.cargas.length > 0) {
+        previaFechamentoAtual.cargas.forEach(c => {
+            totalM3Romaneios += Number(c.vol_bruto) || 0;
+        });
+    }
+
+    let totalM3Avulsos = 0;
+    checkboxesAvulsos.forEach(chk => {
+        if (chk.checked) {
+            const id = parseInt(chk.value);
+            const a = (previaFechamentoAtual.avulsos || []).find(x => x.id === id);
+            if (a && a.tipo === 'carga_avulsa') {
+                totalM3Avulsos += Number(a.qtd_carga) || 0;
+            }
+        }
+    });
+
+    const totalProducaoM3 = totalM3Romaneios + totalM3Avulsos;
 
     // Atualiza resumo visual
     document.getElementById('fech-resumo-salario').innerText = `R$ ${salario.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     document.getElementById('fech-resumo-comissoes').innerText = `+ R$ ${comissoes.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const elAvulsos = document.getElementById('fech-resumo-avulsos');
+    if (elAvulsos) elAvulsos.innerText = `+ R$ ${somaAvulsos.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    
+    const elProducaoM3 = document.getElementById('fech-resumo-producao-m3');
+    if (elProducaoM3) {
+        elProducaoM3.innerText = `${totalProducaoM3.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} m³`;
+    }
+
     document.getElementById('fech-resumo-vales').innerText = `- R$ ${somaValesDescontados.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     
     const elLiquido = document.getElementById('fech-resumo-liquido');
     elLiquido.innerText = `R$ ${saldoLiquido.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     elLiquido.style.color = saldoLiquido >= 0 ? 'var(--accent-color)' : '#ef4444';
 
-    // Salva valores calculados temporariamente
+    // Salva valores consolidados
     previaFechamentoAtual.valoresConsolidados = {
         salario,
         comissoes,
+        avulsos: somaAvulsos,
         vales: somaValesDescontados,
-        liquido: saldoLiquido
+        liquido: saldoLiquido,
+        salarioTipo: isProp ? 'proporcional' : 'integral',
+        diasTrabalhados,
+        totalM3Romaneios,
+        totalM3Avulsos,
+        totalProducaoM3
     };
 }
 
 function toggleSelectAllValesPrevia(selectAllElement) {
     const chkList = document.querySelectorAll('.chk-vale-fech');
+    chkList.forEach(chk => {
+        chk.checked = selectAllElement.checked;
+    });
+    recalcularTotalFechamentoPrevia();
+}
+
+function toggleSelectAllAvulsosPrevia(selectAllElement) {
+    const chkList = document.querySelectorAll('.chk-avulso-fech');
     chkList.forEach(chk => {
         chk.checked = selectAllElement.checked;
     });
@@ -5503,6 +5970,11 @@ async function confirmarSalvarFechamento() {
         if (chk.checked) valesIds.push(parseInt(chk.value));
     });
 
+    const avulsosIds = [];
+    document.querySelectorAll('.chk-avulso-fech').forEach(chk => {
+        if (chk.checked) avulsosIds.push(parseInt(chk.value));
+    });
+
     const f = previaFechamentoAtual.filtros;
     const v = previaFechamentoAtual.valoresConsolidados;
 
@@ -5514,10 +5986,14 @@ async function confirmarSalvarFechamento() {
         romaneio_fim: f.romaneioFim || null,
         valor_salario: v.salario,
         valor_comissao: v.comissoes,
+        valor_avulsos: v.avulsos || 0,
         valor_vales: v.vales,
         valor_liquido: v.liquido,
+        salario_tipo: v.salarioTipo || 'integral',
+        dias_trabalhados: v.diasTrabalhados || 30,
         observacoes: obs,
-        valesIds
+        valesIds,
+        avulsosIds
     };
 
     const confirmResult = await Swal.fire({
@@ -5565,20 +6041,32 @@ async function listarFechamentos() {
                     ? `Roms: ${f.romaneio_inicio} a ${f.romaneio_fim}`
                     : `Período: ${f.periodo_inicio.split('-').reverse().join('/')} a ${f.periodo_fim.split('-').reverse().join('/')}`;
                     
+                const salarioDesc = f.salario_tipo === 'proporcional'
+                    ? `R$ ${f.valor_salario.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <small style="display:block; opacity:0.75; font-size:0.75rem;">(Prop. ${f.dias_trabalhados || 30}d)</small>`
+                    : `R$ ${f.valor_salario.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+                const totalComissaoECargas = (f.valor_comissao || 0) + (f.valor_avulsos || 0);
+
                 return `
                     <tr>
                         <td><b>#${f.id}</b></td>
                         <td>${f.motorista_nome}</td>
                         <td>${dataFmt}</td>
                         <td><span style="font-size:0.8rem; opacity:0.8;">${periodo}</span></td>
-                        <td>R$ ${f.valor_salario.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                        <td style="color:#10b981;">+ R$ ${f.valor_comissao.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        <td>${salarioDesc}</td>
+                        <td style="color:#10b981;">
+                            + R$ ${totalComissaoECargas.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            ${f.valor_avulsos > 0 ? `<small style="display:block; font-size:0.75rem; color:#0284c7;">(Inclui R$ ${f.valor_avulsos.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} avulsos)</small>` : ''}
+                        </td>
                         <td style="color:#ef4444;">- R$ ${f.valor_vales.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                         <td style="font-weight:700; color:var(--accent-color);">R$ ${f.valor_liquido.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                         <td style="text-align:center;">
                             <div style="display:flex; gap:6px; justify-content:center;">
-                                <button class="btn-edit-table" onclick="abrirReciboFechamento(${f.id})" title="Imprimir Recibo" style="background:#0284c7; border:none; padding:4px 8px; color:white; border-radius:4px; cursor:pointer;">
+                                <button class="btn-edit-table" onclick="abrirReciboFechamento(${f.id})" title="Imprimir / Ver Recibo" style="background:#0284c7; border:none; padding:4px 8px; color:white; border-radius:4px; cursor:pointer;">
                                     <i data-lucide="printer" style="width:14px; height:14px;"></i>
+                                </button>
+                                <button class="btn-save-table" onclick="abrirEExportarPDFFechamento(${f.id})" title="Exportar PDF" style="background:#10b981; border:none; padding:4px 8px; color:white; border-radius:4px; cursor:pointer;">
+                                    <i data-lucide="file-text" style="width:14px; height:14px;"></i>
                                 </button>
                                 <button class="btn-delete-table" onclick="estornarFechamento(${f.id})" title="Estornar Fechamento" style="background:#ef4444; border:none; padding:4px 8px; color:white; border-radius:4px; cursor:pointer;">
                                     <i data-lucide="undo" style="width:14px; height:14px;"></i>
@@ -5601,7 +6089,7 @@ async function listarFechamentos() {
 async function estornarFechamento(id) {
     const confirmResult = await Swal.fire({
         title: 'Estornar Fechamento?',
-        text: "Esta ação apagará o fechamento permanente. Todos os vales descontados voltarão a ficar ativos (em aberto) para novo fechamento.",
+        text: "Esta ação apagará o fechamento permanente. Todos os vales e lançamentos avulsos descontados/pagos voltarão a ficar ativos (em aberto) para novo fechamento.",
         icon: 'warning',
         showCancelButton: true,
         confirmButtonColor: '#ef4444',
@@ -5615,7 +6103,7 @@ async function estornarFechamento(id) {
     try {
         const res = await window.api.invoke('excluir-fechamento-motorista', id);
         if (res && res.success) {
-            Swal.fire('Estornado', 'Fechamento cancelado e vales reativados!', 'success');
+            Swal.fire('Estornado', 'Fechamento cancelado! Vales e lançamentos avulsos foram reativados.', 'success');
             listarFechamentos();
         } else {
             Swal.fire('Erro', tratarErroIpc(res.error), 'error');
@@ -5626,65 +6114,190 @@ async function estornarFechamento(id) {
     }
 }
 
+// Variável global para armazenar os dados do último recibo aberto
+let reciboFechamentoAtualDados = null;
+
 // --- 7. EMISSÃO DO RECIBO ---
 async function abrirReciboFechamento(id) {
     try {
         const res = await window.api.invoke('get-fechamento-detalhado', id);
         if (res && res.success) {
+            reciboFechamentoAtualDados = res;
             const f = res.fechamento;
             const dataFmt = f.data_fechamento ? f.data_fechamento.split('-').reverse().join('/') : '---';
             
             document.getElementById('recibo-subtitulo').innerText = `Recibo Nº ${f.id} | Emissão: ${dataFmt}`;
             
+            // Cálculos de totais de Romaneios e Avulsos
+            let totalM3Romaneios = 0;
+            let totalTorasRomaneios = 0;
+            let totalFreteRomaneios = 0;
+            let totalComissaoRomaneios = 0;
+
+            if (res.cargas && res.cargas.length > 0) {
+                res.cargas.forEach(c => {
+                    totalM3Romaneios += Number(c.vol_bruto) || 0;
+                    totalTorasRomaneios += Number(c.total_toras) || 0;
+                    totalFreteRomaneios += Number(c.frete_total) || 0;
+                    totalComissaoRomaneios += Number(c.valor_comissao) || 0;
+                });
+            }
+
+            let totalM3Avulsos = 0;
+            let totalFreteAvulsos = 0;
+            let totalComissaoAvulsos = 0;
+            let qtdCargasAvulsas = 0;
+
+            if (res.avulsos && res.avulsos.length > 0) {
+                res.avulsos.forEach(a => {
+                    if (a.tipo === 'carga_avulsa') {
+                        totalM3Avulsos += Number(a.qtd_carga) || 0;
+                        qtdCargasAvulsas++;
+                    }
+                    totalFreteAvulsos += Number(a.valor_frete) || 0;
+                    totalComissaoAvulsos += Number(a.valor_comissao) || 0;
+                });
+            }
+
+            const totalGeralProducaoM3 = totalM3Romaneios + totalM3Avulsos;
+
             const logoBase64 = window.LOGO_PADRAO_BASE64 || '';
             let html = `
-<div style="display: flex; align-items: center; justify-content: center; gap: 14px; margin-bottom: 18px; border-bottom: 1px dashed #000; padding-bottom: 12px;">
-    ${logoBase64 ? `<img src="${logoBase64}" style="width: 44px; height: 44px; object-fit: contain;" />` : ''}
+<div style="display: flex; align-items: center; justify-content: center; gap: 14px; margin-bottom: 20px; border-bottom: 1.5px dashed #000; padding-bottom: 14px;">
+    ${logoBase64 ? `<img src="${logoBase64}" style="width: 50px; height: 50px; object-fit: contain;" />` : ''}
     <div style="text-align: left;">
-        <h2 style="margin: 0; font-size: 1.05rem; font-weight: bold; color: #0f172a;">MT-PRO - Controle de Estoque de Toras</h2>
-        <p style="margin: 2px 0 0 0; font-size: 0.8rem; font-weight: bold; text-transform: uppercase; color: #475569;">Recibo de Fechamento de Motorista</p>
+        <h2 style="margin: 0; font-size: 1.25rem; font-weight: bold; color: #0f172a;">MT-PRO - Controle de Estoque de Toras</h2>
+        <p style="margin: 3px 0 0 0; font-size: 0.92rem; font-weight: bold; text-transform: uppercase; color: #475569;">Recibo de Fechamento de Motorista • Nº ${f.id}</p>
     </div>
 </div>
 
-<div style="margin-bottom: 15px; font-size: 0.85rem; line-height: 1.4;">
+<div style="margin-bottom: 18px; font-size: 0.95rem; line-height: 1.6; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 16px;">
     <div><strong>MOTORISTA:</strong> ${f.motorista_nome}</div>
     <div><strong>VEÍCULO:</strong> ${f.placa_veiculo || '---'}</div>
     <div><strong>DATA DE EMISSÃO:</strong> ${dataFmt}</div>
-    <div><strong>PERÍODO:</strong> ${f.romaneio_inicio ? `Romaneios ${f.romaneio_inicio} a ${f.romaneio_fim}` : `${f.periodo_inicio.split('-').reverse().join('/')} a ${f.periodo_fim.split('-').reverse().join('/')}`}</div>
+    <div><strong>PERÍODO APURADO:</strong> ${f.romaneio_inicio ? `Romaneios ${f.romaneio_inicio} a ${f.romaneio_fim}` : `${f.periodo_inicio.split('-').reverse().join('/')} a ${f.periodo_fim.split('-').reverse().join('/')}`}</div>
 </div>
 
-<div style="margin-bottom: 15px; border-bottom: 1px dashed #000; padding-bottom: 10px;">
-    <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem; text-align: left;">
+<!-- RESUMO GERAL DA PRODUÇÃO EM M3 -->
+<div style="background: #f5f3ff; border: 1.5px solid #ddd6fe; border-radius: 8px; padding: 14px 16px; margin-bottom: 20px;">
+    <div style="font-weight: 800; font-size: 0.92rem; text-transform: uppercase; margin-bottom: 10px; color: #5b21b6; border-bottom: 1px dashed #c4b5fd; padding-bottom: 6px; display: flex; justify-content: space-between;">
+        <span>RESUMO DA PRODUÇÃO DO MOTORISTA (VOLUME m³)</span>
+        <span style="font-size: 0.82rem; color: #7c3aed; font-weight: 600;">Romaneios + Cargas Avulsas</span>
+    </div>
+    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; text-align: center;">
+        <div style="background: #ffffff; padding: 8px 10px; border-radius: 6px; border: 1px solid #e2e8f0;">
+            <div style="font-size: 0.8rem; color: #64748b; font-weight: 700; text-transform: uppercase;">Romaneios Regulares</div>
+            <div style="font-size: 1.15rem; font-weight: 800; color: #0284c7; margin-top: 3px;">${totalM3Romaneios.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} m³</div>
+            <div style="font-size: 0.78rem; color: #94a3b8; margin-top: 2px;">${res.cargas ? res.cargas.length : 0} romaneios (${totalTorasRomaneios} toras)</div>
+        </div>
+        <div style="background: #ffffff; padding: 8px 10px; border-radius: 6px; border: 1px solid #e2e8f0;">
+            <div style="font-size: 0.8rem; color: #64748b; font-weight: 700; text-transform: uppercase;">Cargas Avulsas</div>
+            <div style="font-size: 1.15rem; font-weight: 800; color: #4338ca; margin-top: 3px;">${totalM3Avulsos.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} m³</div>
+            <div style="font-size: 0.78rem; color: #94a3b8; margin-top: 2px;">${qtdCargasAvulsas} carga(s) avulsa(s)</div>
+        </div>
+        <div style="background: #ede9fe; padding: 8px 10px; border-radius: 6px; border: 1.5px solid #a78bfa;">
+            <div style="font-size: 0.8rem; color: #6d28d9; font-weight: 800; text-transform: uppercase;">TOTAL GERAL PRODUÇÃO</div>
+            <div style="font-size: 1.3rem; font-weight: 900; color: #5b21b6; margin-top: 3px;">${totalGeralProducaoM3.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} m³</div>
+            <div style="font-size: 0.78rem; color: #7c3aed; font-weight: 600; margin-top: 2px;">Total de Madeira Transportada</div>
+        </div>
+    </div>
+</div>
+
+${res.cargas && res.cargas.length > 0 ? `
+<div style="margin-bottom: 20px; border-bottom: 1px dashed #000; padding-bottom: 14px;">
+    <div style="font-weight: bold; font-size: 0.95rem; margin-bottom: 8px;">CARGAS / ROMANEIOS INCLUSOS:</div>
+    <table style="width: 100%; border-collapse: collapse; font-size: 0.92rem; text-align: left;">
         <thead>
-            <tr style="border-bottom: 1px solid #000; font-weight: bold;">
-                <th style="padding: 4px 0;">Cargas</th>
-                <th>Data</th>
-                <th style="text-align: right;">Frete (R$)</th>
-                <th style="text-align: right;">Comissão (${f.motorista_comissao_pct || 0}%)</th>
+            <tr style="border-bottom: 1.5px solid #000; font-weight: bold; background: #f1f5f9;">
+                <th style="padding: 7px 6px;">Romaneio</th>
+                <th style="padding: 7px 6px;">Data</th>
+                <th style="padding: 7px 6px; text-align: center;">Toras</th>
+                <th style="padding: 7px 6px; text-align: right;">Total m³ (Bruto)</th>
+                <th style="padding: 7px 6px; text-align: right;">Frete Total (R$)</th>
+                <th style="padding: 7px 6px; text-align: right;">Comissão (${f.motorista_comissao_pct || 0}%)</th>
             </tr>
         </thead>
         <tbody>
             ${res.cargas.map(c => `
-                <tr>
-                    <td style="padding: 4px 0;">Rom. ${c.numero}</td>
-                    <td>${c.data ? c.data.split('-').reverse().join('/') : '---'}</td>
-                    <td style="text-align: right;">R$ ${(c.frete_total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                    <td style="text-align: right;">R$ ${(c.valor_comissao || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                <tr style="border-bottom: 1px solid #e2e8f0;">
+                    <td style="padding: 6px; font-weight: 600;">Rom. ${c.numero}</td>
+                    <td style="padding: 6px;">${c.data ? c.data.split('-').reverse().join('/') : '---'}</td>
+                    <td style="padding: 6px; text-align: center;">${c.total_toras || 0}</td>
+                    <td style="padding: 6px; text-align: right; font-weight: bold; color: #0284c7;">${(c.vol_bruto || 0).toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} m³</td>
+                    <td style="padding: 6px; text-align: right;">R$ ${(c.frete_total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    <td style="padding: 6px; text-align: right; color: #10b981; font-weight: 600;">R$ ${(c.valor_comissao || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                 </tr>
             `).join('')}
         </tbody>
+        <tfoot>
+            <tr style="border-top: 1.5px solid #000; font-weight: bold; background: #f8fafc; font-size: 0.95rem;">
+                <td colspan="2" style="padding: 8px 6px;">Subtotal Romaneios (${res.cargas.length}):</td>
+                <td style="padding: 8px 6px; text-align: center;">${totalTorasRomaneios}</td>
+                <td style="padding: 8px 6px; text-align: right; color: #0284c7;">${totalM3Romaneios.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} m³</td>
+                <td style="padding: 8px 6px; text-align: right;">R$ ${totalFreteRomaneios.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                <td style="padding: 8px 6px; text-align: right; color: #10b981;">R$ ${totalComissaoRomaneios.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+            </tr>
+        </tfoot>
     </table>
 </div>
+` : ''}
+
+${res.avulsos && res.avulsos.length > 0 ? `
+<div style="margin-bottom: 20px; border-bottom: 1px dashed #000; padding-bottom: 14px;">
+    <div style="font-weight: bold; font-size: 0.95rem; margin-bottom: 8px;">(+) LANÇAMENTOS AVULSOS E BALDEIOS:</div>
+    <table style="width: 100%; border-collapse: collapse; font-size: 0.92rem; text-align: left;">
+        <thead>
+            <tr style="border-bottom: 1.5px solid #000; font-weight: bold; background: #f1f5f9;">
+                <th style="padding: 7px 6px;">Tipo / Descrição</th>
+                <th style="padding: 7px 6px;">Data</th>
+                <th style="padding: 7px 6px; text-align: right;">Qtd / m³</th>
+                <th style="padding: 7px 6px; text-align: right;">Frete/m³ (R$)</th>
+                <th style="padding: 7px 6px; text-align: right;">Frete Total (R$)</th>
+                <th style="padding: 7px 6px; text-align: right;">Comissão (R$)</th>
+            </tr>
+        </thead>
+        <tbody>
+            ${res.avulsos.map(a => {
+                const tipoNome = a.tipo === 'carga_avulsa' ? '🚛 Carga Avulsa' : (a.tipo === 'baldeio' ? '🔄 Baldeio' : 'Outros');
+                const desc = a.descricao ? ` - ${a.descricao}` : '';
+                const qtdFmt = a.qtd_carga ? `${a.qtd_carga.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} m³` : '---';
+                const freteUnitFmt = a.valor_frete_unitario ? `R$ ${a.valor_frete_unitario.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '---';
+                const freteFmt = a.valor_frete ? `R$ ${a.valor_frete.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '---';
+
+                return `
+                    <tr style="border-bottom: 1px solid #e2e8f0;">
+                        <td style="padding: 6px;"><strong>${tipoNome}</strong>${desc}</td>
+                        <td style="padding: 6px;">${a.data ? a.data.split('-').reverse().join('/') : '---'}</td>
+                        <td style="padding: 6px; text-align: right; font-weight: bold; color: #4338ca;">${qtdFmt}</td>
+                        <td style="padding: 6px; text-align: right;">${freteUnitFmt}</td>
+                        <td style="padding: 6px; text-align: right;">${freteFmt}</td>
+                        <td style="padding: 6px; text-align: right; color: #10b981; font-weight: 600;">+ R$ ${(a.valor_comissao || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    </tr>
+                `;
+            }).join('')}
+        </tbody>
+        <tfoot>
+            <tr style="border-top: 1.5px solid #000; font-weight: bold; background: #f8fafc; font-size: 0.95rem;">
+                <td colspan="2" style="padding: 8px 6px;">Subtotal Avulsos (${res.avulsos.length}):</td>
+                <td style="padding: 8px 6px; text-align: right; color: #4338ca;">${totalM3Avulsos > 0 ? `${totalM3Avulsos.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} m³` : '---'}</td>
+                <td style="padding: 8px 6px; text-align: right;">---</td>
+                <td style="padding: 8px 6px; text-align: right;">R$ ${totalFreteAvulsos.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                <td style="padding: 8px 6px; text-align: right; color: #10b981;">+ R$ ${totalComissaoAvulsos.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+            </tr>
+        </tfoot>
+    </table>
+</div>
+` : ''}
 
 ${res.vales && res.vales.length > 0 ? `
-<div style="margin-bottom: 15px; border-bottom: 1px dashed #000; padding-bottom: 10px;">
-    <div style="font-weight: bold; font-size: 0.8rem; margin-bottom: 5px;">(-) DETALHE DOS VALES DESCONTADOS:</div>
-    <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem; text-align: left;">
+<div style="margin-bottom: 20px; border-bottom: 1px dashed #000; padding-bottom: 14px;">
+    <div style="font-weight: bold; font-size: 0.95rem; margin-bottom: 8px;">(-) DETALHE DOS VALES DESCONTADOS:</div>
+    <table style="width: 100%; border-collapse: collapse; font-size: 0.92rem; text-align: left;">
         <tbody>
             ${res.vales.map(v => `
-                <tr>
-                    <td style="padding: 2px 0;">${v.data ? v.data.split('-').reverse().join('/') : '---'} - ${v.descricao || 'Adiantamento'}</td>
-                    <td style="text-align: right; color:#ef4444;">- R$ ${v.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                <tr style="border-bottom: 1px solid #e2e8f0;">
+                    <td style="padding: 5px 2px;">${v.data ? v.data.split('-').reverse().join('/') : '---'} - ${v.descricao || 'Adiantamento'}</td>
+                    <td style="text-align: right; color:#ef4444; font-weight: 600; padding: 5px 2px;">- R$ ${v.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                 </tr>
             `).join('')}
         </tbody>
@@ -5692,36 +6305,42 @@ ${res.vales && res.vales.length > 0 ? `
 </div>
 ` : ''}
 
-<div style="font-size: 0.9rem; line-height: 1.6; margin-bottom: 25px; border-bottom: 1px dashed #000; padding-bottom: 10px;">
+<div style="font-size: 1.02rem; line-height: 1.8; margin-bottom: 24px; border-bottom: 1.5px dashed #000; padding-bottom: 14px;">
     <div style="display: flex; justify-content: space-between;">
-        <span>Salário Fixo:</span>
+        <span>${f.salario_tipo === 'proporcional' ? `Salário Proporcional (${f.dias_trabalhados || 30} dias / 30):` : 'Salário Fixo:'}</span>
         <span>R$ ${f.valor_salario.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
     </div>
     <div style="display: flex; justify-content: space-between; color: green;">
-        <span>(+) Total Comissões:</span>
+        <span>(+) Comissões Romaneios:</span>
         <span>+ R$ ${f.valor_comissao.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
     </div>
+    ${(f.valor_avulsos || 0) > 0 ? `
+    <div style="display: flex; justify-content: space-between; color: green;">
+        <span>(+) Comissões Avulsos & Baldeios:</span>
+        <span>+ R$ ${(f.valor_avulsos || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+    </div>
+    ` : ''}
     <div style="display: flex; justify-content: space-between; color: red;">
         <span>(-) Total Vales:</span>
         <span>- R$ ${f.valor_vales.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
     </div>
-    <div style="display: flex; justify-content: space-between; font-weight: bold; font-size: 1rem; border-top: 1px dashed #000; margin-top: 5px; padding-top: 5px;">
+    <div style="display: flex; justify-content: space-between; font-weight: bold; font-size: 1.25rem; border-top: 1.5px dashed #000; margin-top: 8px; padding-top: 8px;">
         <span>VALOR LÍQUIDO PAGO:</span>
-        <span>R$ ${f.valor_liquido.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+        <span style="color: #0f172a;">R$ ${f.valor_liquido.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
     </div>
 </div>
 
 ${f.observacoes ? `
-<div style="margin-bottom: 25px; font-size: 0.8rem; font-style: italic;">
+<div style="margin-bottom: 24px; font-size: 0.92rem; font-style: italic; background: #fffbeb; padding: 10px 14px; border-radius: 8px; border: 1px solid #fef3c7;">
     <strong>Observações:</strong> ${f.observacoes}
 </div>
 ` : ''}
 
-<div style="margin-top: 40px; text-align: center; font-size: 0.8rem;">
-    <div style="border-top: 1px solid #000; width: 250px; margin: 0 auto 5px auto; padding-top: 5px;">
+<div style="margin-top: 40px; text-align: center; font-size: 0.92rem;">
+    <div style="border-top: 1px solid #000; width: 280px; margin: 0 auto 6px auto; padding-top: 6px; font-weight: bold;">
         ${f.motorista_nome}
     </div>
-    <span>Assinatura do Motorista</span>
+    <span style="color: #64748b;">Assinatura do Motorista</span>
 </div>
             `;
             
@@ -5747,9 +6366,9 @@ function fecharModalRecibo() {
 
 function imprimirReciboConteudo() {
     const conteudo = document.getElementById('recibo-impressao-conteudo').innerHTML;
-    const win = window.open('', '_blank', 'width=800,height=600');
+    const win = window.open('', '_blank', 'width=850,height=650');
     win.document.write('<html><head><title>Recibo de Fechamento</title>');
-    win.document.write('<style>body { font-family: "Courier New", monospace; padding: 20px; }</style>');
+    win.document.write('<style>body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; padding: 25px; color: #0f172a; font-size: 13.5px; line-height: 1.45; }</style>');
     win.document.write('</head><body>');
     win.document.write(conteudo);
     win.document.write('</body></html>');
@@ -5760,6 +6379,527 @@ function imprimirReciboConteudo() {
         win.print();
         win.close();
     }, 250);
+}
+
+async function exportarReciboFechamentoPDF() {
+    if (!reciboFechamentoAtualDados || !reciboFechamentoAtualDados.fechamento) {
+        return Swal.fire('Atenção', 'Nenhum recibo carregado para exportação.', 'warning');
+    }
+
+    const res = reciboFechamentoAtualDados;
+    const f = res.fechamento;
+    const dataFmt = f.data_fechamento ? f.data_fechamento.split('-').reverse().join('/') : '---';
+
+    // Cálculos de totais
+    let totalM3Romaneios = 0;
+    let totalTorasRomaneios = 0;
+    let totalFreteRomaneios = 0;
+    let totalComissaoRomaneios = 0;
+
+    if (res.cargas && res.cargas.length > 0) {
+        res.cargas.forEach(c => {
+            totalM3Romaneios += Number(c.vol_bruto) || 0;
+            totalTorasRomaneios += Number(c.total_toras) || 0;
+            totalFreteRomaneios += Number(c.frete_total) || 0;
+            totalComissaoRomaneios += Number(c.valor_comissao) || 0;
+        });
+    }
+
+    let totalM3Avulsos = 0;
+    let totalFreteAvulsos = 0;
+    let totalComissaoAvulsos = 0;
+    let qtdCargasAvulsas = 0;
+
+    if (res.avulsos && res.avulsos.length > 0) {
+        res.avulsos.forEach(a => {
+            if (a.tipo === 'carga_avulsa') {
+                totalM3Avulsos += Number(a.qtd_carga) || 0;
+                qtdCargasAvulsas++;
+            }
+            totalFreteAvulsos += Number(a.valor_frete) || 0;
+            totalComissaoAvulsos += Number(a.valor_comissao) || 0;
+        });
+    }
+
+    const totalGeralProducaoM3 = totalM3Romaneios + totalM3Avulsos;
+    const logoBase64 = window.LOGO_PADRAO_BASE64 || '';
+    const periodoFormatado = f.romaneio_inicio 
+        ? `Romaneios ${f.romaneio_inicio} a ${f.romaneio_fim}` 
+        : `${f.periodo_inicio.split('-').reverse().join('/')} a ${f.periodo_fim.split('-').reverse().join('/')}`;
+
+    const htmlPDF = `<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Recibo de Fechamento de Motorista - #${f.id}</title>
+    <style>
+        @page {
+            size: A4 portrait;
+            margin: 10mm 12mm 10mm 12mm;
+        }
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+            color: #0f172a;
+            margin: 0;
+            padding: 0;
+            font-size: 11.5px;
+            line-height: 1.4;
+            background: #ffffff;
+        }
+        .header-wrapper {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 2.5px solid #0284c7;
+            padding-bottom: 8px;
+            margin-bottom: 12px;
+        }
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .header-logo {
+            width: 48px;
+            height: 48px;
+            object-fit: contain;
+        }
+        .header-title h1 {
+            font-size: 16px;
+            margin: 0;
+            font-weight: 800;
+            color: #0f172a;
+            letter-spacing: -0.01em;
+        }
+        .header-title p {
+            font-size: 10.5px;
+            margin: 2px 0 0 0;
+            color: #475569;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+        .badge-recibo {
+            background: #0284c7;
+            color: #ffffff;
+            font-weight: 800;
+            font-size: 12px;
+            padding: 6px 14px;
+            border-radius: 6px;
+            text-align: right;
+        }
+        .info-grid {
+            display: grid;
+            grid-template-columns: 2fr 1.2fr 1.6fr 1.2fr;
+            gap: 8px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            padding: 9px 12px;
+            margin-bottom: 12px;
+        }
+        .info-item strong {
+            display: block;
+            color: #64748b;
+            font-size: 9px;
+            text-transform: uppercase;
+            font-weight: 700;
+            margin-bottom: 2px;
+        }
+        .info-item span {
+            font-size: 12px;
+            font-weight: 700;
+            color: #0f172a;
+        }
+        .section-title {
+            font-size: 11px;
+            font-weight: 800;
+            text-transform: uppercase;
+            color: #0284c7;
+            margin: 12px 0 5px 0;
+            letter-spacing: 0.03em;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 10px;
+            font-size: 10.5px;
+        }
+        table thead th {
+            background-color: #f1f5f9;
+            color: #334155;
+            font-weight: 700;
+            text-transform: uppercase;
+            font-size: 9.5px;
+            padding: 6px 8px;
+            border-top: 1px solid #cbd5e1;
+            border-bottom: 1.5px solid #94a3b8;
+            text-align: left;
+        }
+        table tbody td {
+            padding: 5.5px 8px;
+            border-bottom: 1px solid #e2e8f0;
+            vertical-align: middle;
+        }
+        table tbody tr:nth-child(even) {
+            background-color: #fbfcfe;
+        }
+        table tfoot td {
+            padding: 6.5px 8px;
+            border-top: 1.5px solid #64748b;
+            border-bottom: 1px solid #cbd5e1;
+            background-color: #f8fafc;
+            font-weight: 700;
+            font-size: 10.5px;
+        }
+        .producao-card {
+            background: #f5f3ff;
+            border: 1.5px solid #ddd6fe;
+            border-radius: 8px;
+            padding: 10px 14px;
+            margin: 12px 0;
+            page-break-inside: avoid;
+        }
+        .producao-header {
+            font-size: 10.5px;
+            font-weight: 800;
+            color: #5b21b6;
+            text-transform: uppercase;
+            margin-bottom: 7px;
+            border-bottom: 1px dashed #c4b5fd;
+            padding-bottom: 4px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .producao-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            text-align: center;
+        }
+        .prod-box {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            padding: 6px 10px;
+        }
+        .prod-box.destaque {
+            background: #ede9fe;
+            border: 1.5px solid #a78bfa;
+        }
+        .prod-label {
+            font-size: 8.5px;
+            font-weight: 700;
+            color: #64748b;
+            text-transform: uppercase;
+        }
+        .prod-valor {
+            font-size: 13px;
+            font-weight: 800;
+            color: #0f172a;
+            margin-top: 2px;
+        }
+        .prod-valor.purple {
+            color: #5b21b6;
+            font-size: 14.5px;
+            font-weight: 900;
+        }
+        .prod-sub {
+            font-size: 8px;
+            color: #94a3b8;
+        }
+        .financeiro-card {
+            background: #f8fafc;
+            border: 1.5px solid #cbd5e1;
+            border-radius: 8px;
+            padding: 11px 15px;
+            margin-top: 11px;
+            page-break-inside: avoid;
+        }
+        .fin-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 3px 0;
+            font-size: 11px;
+        }
+        .fin-total {
+            border-top: 1.5px solid #0f172a;
+            margin-top: 5px;
+            padding-top: 6px;
+            font-size: 13.5px;
+            font-weight: 800;
+        }
+        .assinaturas {
+            margin-top: 36px;
+            display: flex;
+            justify-content: space-around;
+            page-break-inside: avoid;
+        }
+        .sig-line {
+            border-top: 1px solid #475569;
+            width: 230px;
+            text-align: center;
+            font-size: 10px;
+            font-weight: 600;
+            color: #334155;
+            padding-top: 5px;
+        }
+        .footer {
+            margin-top: 20px;
+            font-size: 8.5px;
+            color: #94a3b8;
+            border-top: 1px solid #e2e8f0;
+            padding-top: 5px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="header-wrapper">
+        <div class="header-left">
+            ${logoBase64 ? `<img src="${logoBase64}" class="header-logo" />` : ''}
+            <div class="header-title">
+                <h1>MT-PRO - Controle de Estoque de Toras</h1>
+                <p>Recibo Oficial de Fechamento de Motorista</p>
+            </div>
+        </div>
+        <div class="badge-recibo">
+            RECIBO Nº #${f.id}
+        </div>
+    </div>
+
+    <div class="info-grid">
+        <div class="info-item">
+            <strong>Motorista</strong>
+            <span>${f.motorista_nome}</span>
+        </div>
+        <div class="info-item">
+            <strong>Veículo</strong>
+            <span>${f.placa_veiculo || '---'}</span>
+        </div>
+        <div class="info-item">
+            <strong>Período Apurado</strong>
+            <span>${periodoFormatado}</span>
+        </div>
+        <div class="info-item">
+            <strong>Data de Emissão</strong>
+            <span>${dataFmt}</span>
+        </div>
+    </div>
+
+    <!-- RESUMO DA PRODUÇÃO TOTAL EM M3 -->
+    <div class="producao-card">
+        <div class="producao-header">
+            <span>📊 RESUMO DA PRODUÇÃO DO MOTORISTA (VOLUME m³)</span>
+            <span>Romaneios Regulares + Cargas Avulsas</span>
+        </div>
+        <div class="producao-grid">
+            <div class="prod-box">
+                <div class="prod-label">Romaneios Regulares</div>
+                <div class="prod-valor" style="color: #0284c7;">${totalM3Romaneios.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} m³</div>
+                <div class="prod-sub">${res.cargas ? res.cargas.length : 0} romaneios (${totalTorasRomaneios} toras)</div>
+            </div>
+            <div class="prod-box">
+                <div class="prod-label">Cargas Avulsas</div>
+                <div class="prod-valor" style="color: #4338ca;">${totalM3Avulsos.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} m³</div>
+                <div class="prod-sub">${qtdCargasAvulsas} carga(s) avulsa(s)</div>
+            </div>
+            <div class="prod-box destaque">
+                <div class="prod-label" style="color: #6d28d9;">TOTAL GERAL PRODUÇÃO</div>
+                <div class="prod-valor purple">${totalGeralProducaoM3.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} m³</div>
+                <div class="prod-sub" style="color: #7c3aed; font-weight: 600;">Total de Madeira Transportada</div>
+            </div>
+        </div>
+    </div>
+
+    ${res.cargas && res.cargas.length > 0 ? `
+    <div class="section-title">
+        <span>Cargas / Romaneios Inclusos (${res.cargas.length})</span>
+        <span style="font-size: 8px; font-weight: normal; color: #64748b;">Comissão: ${f.motorista_comissao_pct || 0}%</span>
+    </div>
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 18%;">Romaneio</th>
+                <th style="width: 14%;">Data</th>
+                <th style="width: 12%; text-align: center;">Toras</th>
+                <th style="width: 18%; text-align: right;">Total m³ (Bruto)</th>
+                <th style="width: 18%; text-align: right;">Frete Total (R$)</th>
+                <th style="width: 20%; text-align: right;">Comissão (R$)</th>
+            </tr>
+        </thead>
+        <tbody>
+            ${res.cargas.map(c => `
+                <tr>
+                    <td><b>Rom. ${c.numero}</b></td>
+                    <td>${c.data ? c.data.split('-').reverse().join('/') : '---'}</td>
+                    <td style="text-align: center;">${c.total_toras || 0}</td>
+                    <td style="text-align: right; font-weight: 700; color: #0284c7;">${(c.vol_bruto || 0).toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} m³</td>
+                    <td style="text-align: right;">R$ ${(c.frete_total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    <td style="text-align: right; color: #10b981; font-weight: 700;">R$ ${(c.valor_comissao || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                </tr>
+            `).join('')}
+        </tbody>
+        <tfoot>
+            <tr>
+                <td colspan="2"><b>Subtotal Romaneios:</b></td>
+                <td style="text-align: center;"><b>${totalTorasRomaneios}</b></td>
+                <td style="text-align: right; color: #0284c7;"><b>${totalM3Romaneios.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} m³</b></td>
+                <td style="text-align: right;"><b>R$ ${totalFreteRomaneios.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></td>
+                <td style="text-align: right; color: #10b981;"><b>R$ ${totalComissaoRomaneios.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></td>
+            </tr>
+        </tfoot>
+    </table>
+    ` : ''}
+
+    ${res.avulsos && res.avulsos.length > 0 ? `
+    <div class="section-title">
+        <span>Lançamentos Avulsos e Baldeios (${res.avulsos.length})</span>
+    </div>
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 32%;">Tipo / Descrição</th>
+                <th style="width: 14%;">Data</th>
+                <th style="width: 14%; text-align: right;">Qtd / m³</th>
+                <th style="width: 12%; text-align: right;">Frete/m³</th>
+                <th style="width: 14%; text-align: right;">Frete Total</th>
+                <th style="width: 14%; text-align: right;">Comissão</th>
+            </tr>
+        </thead>
+        <tbody>
+            ${res.avulsos.map(a => {
+                const tipoNome = a.tipo === 'carga_avulsa' ? 'Carga Avulsa' : (a.tipo === 'baldeio' ? 'Baldeio' : 'Outros');
+                const desc = a.descricao ? ` - ${a.descricao}` : '';
+                const qtdFmt = a.qtd_carga ? `${a.qtd_carga.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} m³` : '---';
+                const freteUnitFmt = a.valor_frete_unitario ? `R$ ${a.valor_frete_unitario.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '---';
+                const freteFmt = a.valor_frete ? `R$ ${a.valor_frete.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '---';
+
+                return `
+                    <tr>
+                        <td><b>${tipoNome}</b>${desc}</td>
+                        <td>${a.data ? a.data.split('-').reverse().join('/') : '---'}</td>
+                        <td style="text-align: right; font-weight: 700; color: #4338ca;">${qtdFmt}</td>
+                        <td style="text-align: right;">${freteUnitFmt}</td>
+                        <td style="text-align: right;">${freteFmt}</td>
+                        <td style="text-align: right; color: #10b981; font-weight: 700;">+ R$ ${(a.valor_comissao || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    </tr>
+                `;
+            }).join('')}
+        </tbody>
+        <tfoot>
+            <tr>
+                <td colspan="2"><b>Subtotal Avulsos:</b></td>
+                <td style="text-align: right; color: #4338ca;"><b>${totalM3Avulsos > 0 ? `${totalM3Avulsos.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} m³` : '---'}</b></td>
+                <td style="text-align: right;">---</td>
+                <td style="text-align: right;"><b>R$ ${totalFreteAvulsos.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></td>
+                <td style="text-align: right; color: #10b981;"><b>+ R$ ${totalComissaoAvulsos.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></td>
+            </tr>
+        </tfoot>
+    </table>
+    ` : ''}
+
+    ${res.vales && res.vales.length > 0 ? `
+    <div class="section-title">
+        <span>Vales Descontados (${res.vales.length})</span>
+    </div>
+    <table>
+        <tbody>
+            ${res.vales.map(v => `
+                <tr>
+                    <td style="width: 75%;">${v.data ? v.data.split('-').reverse().join('/') : '---'} - ${v.descricao || 'Adiantamento'}</td>
+                    <td style="width: 25%; text-align: right; color: #ef4444; font-weight: 700;">- R$ ${v.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                </tr>
+            `).join('')}
+        </tbody>
+    </table>
+    ` : ''}
+
+    <!-- RESUMO FINANCEIRO -->
+    <div class="financeiro-card">
+        <div class="fin-row">
+            <span>${f.salario_tipo === 'proporcional' ? `Salário Proporcional (${f.dias_trabalhados || 30} dias / 30):` : 'Salário Fixo:'}</span>
+            <span style="font-weight: 600;">R$ ${f.valor_salario.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+        </div>
+        <div class="fin-row" style="color: #059669;">
+            <span>(+) Comissões Romaneios:</span>
+            <span style="font-weight: 700;">+ R$ ${f.valor_comissao.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+        </div>
+        ${(f.valor_avulsos || 0) > 0 ? `
+        <div class="fin-row" style="color: #059669;">
+            <span>(+) Comissões Avulsos & Baldeios:</span>
+            <span style="font-weight: 700;">+ R$ ${(f.valor_avulsos || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+        </div>
+        ` : ''}
+        <div class="fin-row" style="color: #dc2626;">
+            <span>(-) Total Vales / Adiantamentos:</span>
+            <span style="font-weight: 700;">- R$ ${f.valor_vales.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+        </div>
+        <div class="fin-row fin-total">
+            <span>VALOR LÍQUIDO A RECEBER:</span>
+            <span style="color: #0284c7;">R$ ${f.valor_liquido.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+        </div>
+    </div>
+
+    ${f.observacoes ? `
+    <div style="margin-top: 10px; font-size: 8.5px; font-style: italic; background: #fffbeb; padding: 6px 10px; border-radius: 4px; border: 1px solid #fef3c7;">
+        <strong>Observações:</strong> ${f.observacoes}
+    </div>
+    ` : ''}
+
+    <div class="assinaturas">
+        <div class="sig-line">${f.motorista_nome}<br><span style="font-size: 7.5px; color: #64748b;">Motorista</span></div>
+        <div class="sig-line">Responsável Financeiro / Pátio<br><span style="font-size: 7.5px; color: #64748b;">Empresa</span></div>
+    </div>
+
+    <div class="footer">
+        Documento gerado pelo sistema MT-PRO - Controle de Estoque de Toras em ${new Date().toLocaleString('pt-BR')}
+    </div>
+</body>
+</html>`;
+
+    const motoNomeLimpo = (f.motorista_nome || 'Motorista').replace(/[\/\\:*?"<>|]/g, '_');
+    const nomeArquivoPDF = gerarNomeArquivoDataHora('Fechamento_Motorista', `${motoNomeLimpo}_Recibo_${f.id}`);
+
+    try {
+        Swal.fire({ title: 'Gerando PDF...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+        const resPdf = await window.api.invoke('gerar-pdf-logs', { html: htmlPDF, nomeArquivo: nomeArquivoPDF });
+        if (resPdf && resPdf.success) {
+            Swal.fire({
+                icon: 'success',
+                title: 'PDF Exportado com Sucesso!',
+                text: `Arquivo "${resPdf.nomeArquivo}" salvo na pasta Documentos.`,
+                timer: 3500,
+                showConfirmButton: false
+            });
+        } else {
+            throw new Error(resPdf?.error || 'Erro ao gerar PDF.');
+        }
+    } catch (err) {
+        console.error(err);
+        Swal.fire('Erro', tratarErroIpc(err), 'error');
+    }
+}
+
+async function abrirEExportarPDFFechamento(id) {
+    try {
+        Swal.fire({ title: 'Carregando fechamento...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+        const res = await window.api.invoke('get-fechamento-detalhado', id);
+        if (res && res.success) {
+            reciboFechamentoAtualDados = res;
+            await exportarReciboFechamentoPDF();
+        } else {
+            Swal.fire('Erro', tratarErroIpc(res.error), 'error');
+        }
+    } catch (e) {
+        console.error(e);
+        Swal.fire('Erro', 'Falha ao buscar fechamento para exportar PDF.', 'error');
+    }
 }
 
 // --- 8. GERENCIAMENTO DE VALES ---
@@ -5774,7 +6914,6 @@ async function salvarValeMotorista() {
         return Swal.fire('Atenção', 'Selecione o motorista, informe o valor e a data do vale.', 'warning');
     }
 
-    // Limpa valor formatado (ex: "1.000,00" -> 1000.00)
     let valorLimpo = valorRaw.replace(/\./g, '').replace(',', '.');
     const valor = parseFloat(valorLimpo) || 0;
 
@@ -5900,16 +7039,390 @@ async function excluirVale(id) {
     }
 }
 
-function mascaraMoeda(input) {
-    let value = input.value.replace(/\D/g, '');
-    if (value === "") {
-        input.value = "";
+// --- 9. GERENCIAMENTO DE LANÇAMENTOS AVULSOS (CARGAS AVULSAS, BALDEIOS E OUTROS) ---
+function aoMudarMotoristaAvulso() {
+    const motoristaId = parseInt(document.getElementById('avulso-motorista-id').value);
+    const m = cacheMotoristasFechamento.find(x => x.id === motoristaId);
+    const badge = document.getElementById('avulso-pct-badge');
+    if (badge) {
+        badge.innerText = m && m.comissao ? `${m.comissao}%` : '0%';
+    }
+    calcularFreteEComissaoAvulso();
+}
+
+function toggleTipoAvulso() {
+    const tipo = document.getElementById('avulso-tipo').value;
+    const containerCarga = document.getElementById('container-avulso-carga');
+    const containerSimples = document.getElementById('container-avulso-simples');
+    if (tipo === 'carga_avulsa') {
+        containerCarga.style.display = 'grid';
+        containerSimples.style.display = 'none';
+        calcularFreteEComissaoAvulso();
+    } else {
+        containerCarga.style.display = 'none';
+        containerSimples.style.display = 'flex';
+    }
+}
+
+function calcularFreteEComissaoAvulso() {
+    const tipo = document.getElementById('avulso-tipo').value;
+    if (tipo !== 'carga_avulsa') return;
+
+    const motoristaId = parseInt(document.getElementById('avulso-motorista-id').value);
+    const m = cacheMotoristasFechamento.find(x => x.id === motoristaId);
+    const comissaoPct = m ? (m.comissao || 0) : 0;
+
+    const qtdRaw = document.getElementById('avulso-qtd').value;
+    const freteUnitRaw = document.getElementById('avulso-frete-unitario').value;
+
+    let qtdLimpo = qtdRaw.replace(/\./g, '').replace(',', '.');
+    let qtd = parseFloat(qtdLimpo) || 0;
+
+    let freteUnitLimpo = freteUnitRaw.replace(/\./g, '').replace(',', '.');
+    let freteUnit = parseFloat(freteUnitLimpo) || 0;
+
+    // Se informou quantidade e frete unitário, calcula o Frete Total automaticamente = Qtd * Frete Unitário
+    if (qtd > 0 && freteUnit > 0) {
+        const freteTotal = Math.round((qtd * freteUnit) * 100) / 100;
+        document.getElementById('avulso-frete').value = freteTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        
+        // Calcula Comissão = Frete Total * % Comissão
+        const valorComissao = Math.round(((freteTotal * comissaoPct) / 100) * 100) / 100;
+        document.getElementById('avulso-comissao').value = valorComissao.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    } else if (!qtdRaw && !freteUnitRaw) {
+        document.getElementById('avulso-frete').value = '';
+        document.getElementById('avulso-comissao').value = '';
+    } else {
+        calcularComissaoDiretaFrete();
+    }
+}
+
+function calcularComissaoDiretaFrete() {
+    const motoristaId = parseInt(document.getElementById('avulso-motorista-id').value);
+    const m = cacheMotoristasFechamento.find(x => x.id === motoristaId);
+    const comissaoPct = m ? (m.comissao || 0) : 0;
+
+    const freteRaw = document.getElementById('avulso-frete').value;
+    let freteLimpo = freteRaw.replace(/\./g, '').replace(',', '.');
+    const freteTotal = parseFloat(freteLimpo) || 0;
+
+    if (freteTotal > 0) {
+        const valorComissao = Math.round(((freteTotal * comissaoPct) / 100) * 100) / 100;
+        document.getElementById('avulso-comissao').value = valorComissao.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    } else if (!freteRaw) {
+        document.getElementById('avulso-comissao').value = '';
+    }
+}
+
+async function salvarAvulsoMotorista() {
+    const motoristaId = document.getElementById('avulso-motorista-id').value;
+    const tipo = document.getElementById('avulso-tipo').value;
+    const data = document.getElementById('avulso-data').value;
+    const descricao = document.getElementById('avulso-descricao').value.trim();
+    const id = document.getElementById('avulso-id').value;
+
+    if (!motoristaId || !data) {
+        return Swal.fire('Atenção', 'Selecione o motorista e informe a data do lançamento.', 'warning');
+    }
+
+    let qtdCarga = 0;
+    let valorFreteUnitario = 0;
+    let valorFrete = 0;
+    let valorComissao = 0;
+
+    if (tipo === 'carga_avulsa') {
+        const qtdRaw = document.getElementById('avulso-qtd').value;
+        const freteUnitRaw = document.getElementById('avulso-frete-unitario').value;
+        const freteRaw = document.getElementById('avulso-frete').value;
+        const comissaoRaw = document.getElementById('avulso-comissao').value;
+
+        qtdCarga = parseFloat(qtdRaw.replace(/\./g, '').replace(',', '.')) || 0;
+        valorFreteUnitario = parseFloat(freteUnitRaw.replace(/\./g, '').replace(',', '.')) || 0;
+        valorFrete = parseFloat(freteRaw.replace(/\./g, '').replace(',', '.')) || 0;
+        valorComissao = parseFloat(comissaoRaw.replace(/\./g, '').replace(',', '.')) || 0;
+
+        if (qtdCarga <= 0) {
+            return Swal.fire('Atenção', 'Informe a quantidade da carga (m³).', 'warning');
+        }
+        if (valorFrete <= 0) {
+            return Swal.fire('Atenção', 'Informe o valor do frete por m³ ou o valor total do frete.', 'warning');
+        }
+    } else {
+        // Baldeios e outros serviços
+        const comissaoRaw = document.getElementById('avulso-comissao-direta').value;
+        let comissaoLimpa = comissaoRaw.replace(/\./g, '').replace(',', '.');
+        valorComissao = parseFloat(comissaoLimpa) || 0;
+
+        if (valorComissao <= 0) {
+            return Swal.fire('Atenção', 'Informe o valor da comissão / pagamento para o motorista.', 'warning');
+        }
+    }
+
+    const avulso = {
+        motorista_id: parseInt(motoristaId),
+        tipo,
+        data,
+        descricao,
+        qtd_carga: qtdCarga,
+        valor_frete_unitario: valorFreteUnitario,
+        valor_frete: valorFrete,
+        valor_comissao: valorComissao
+    };
+
+    if (id) avulso.id = parseInt(id);
+
+    try {
+        const res = await window.api.invoke('salvar-avulso-motorista', avulso);
+        if (res && res.success) {
+            avisar('success', id ? 'Lançamento avulso atualizado!' : 'Lançamento avulso registrado com sucesso!');
+            resetFormAvulso();
+            listarAvulsos();
+        } else {
+            Swal.fire('Erro', tratarErroIpc(res.error), 'error');
+        }
+    } catch (e) {
+        console.error(e);
+        Swal.fire('Erro', 'Falha ao salvar lançamento avulso.', 'error');
+    }
+}
+
+async function listarAvulsos() {
+    const tbody = document.getElementById('avulso-tabela-lista');
+    if (!tbody) return;
+
+    try {
+        const list = await window.api.invoke('listar-avulsos-motorista', { motoristaId: 'todos', status: 'todos' });
+        if (list && list.length > 0) {
+            tbody.innerHTML = list.map(a => {
+                const dataFmt = a.data ? a.data.split('-').reverse().join('/') : '---';
+                const isPago = a.status === 'pago';
+                const statusBadge = isPago 
+                    ? `<span style="background:var(--badge-neutral-bg, #f1f5f9); color:var(--text-muted, #64748b); padding:4px 8px; border-radius:12px; font-size:0.75rem; font-weight:bold;">PAGO (FECH. #${a.fechamento_id})</span>`
+                    : `<span style="background:var(--badge-success-bg, #dcfce7); color:#16a34a; padding:4px 8px; border-radius:12px; font-size:0.75rem; font-weight:bold;">EM ABERTO</span>`;
+                
+                let tipoBadge = '<span style="background:var(--badge-neutral-bg, #f1f5f9); padding:3px 8px; border-radius:6px; font-weight:600; font-size:0.8rem;">Outros</span>';
+                if (a.tipo === 'carga_avulsa') {
+                    tipoBadge = '<span style="background:#e0f2fe; color:#0284c7; padding:3px 8px; border-radius:6px; font-weight:600; font-size:0.8rem;">🚛 Carga Avulsa</span>';
+                } else if (a.tipo === 'baldeio') {
+                    tipoBadge = '<span style="background:#fef3c7; color:#d97706; padding:3px 8px; border-radius:6px; font-weight:600; font-size:0.8rem;">🔄 Baldeio</span>';
+                }
+
+                const qtdFmt = a.qtd_carga ? a.qtd_carga.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) : '---';
+                const freteUnitFmt = a.valor_frete_unitario ? `R$ ${a.valor_frete_unitario.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '---';
+                const freteFmt = a.valor_frete ? `R$ ${a.valor_frete.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '---';
+
+                const acoes = isPago 
+                    ? `---` 
+                    : `
+                        <div style="display:flex; gap:6px; justify-content:center;">
+                            <button class="btn-edit-table" onclick="prepararEdicaoAvulso('${encodeURIComponent(JSON.stringify(a))}')" title="Editar">
+                                <i data-lucide="pencil" style="width:14px; height:14px;"></i>
+                            </button>
+                            <button class="btn-delete-table" onclick="excluirAvulso(${a.id})" title="Excluir">
+                                <i data-lucide="trash-2" style="width:14px; height:14px;"></i>
+                            </button>
+                        </div>
+                      `;
+                      
+                return `
+                    <tr>
+                        <td>${dataFmt}</td>
+                        <td><b>${a.motorista_nome}</b></td>
+                        <td>${tipoBadge}</td>
+                        <td>${qtdFmt}</td>
+                        <td>${freteUnitFmt}</td>
+                        <td>${freteFmt}</td>
+                        <td style="font-weight:700; color:#10b981;">+ R$ ${a.valor_comissao.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        <td>${a.descricao || 'Sem descrição'}</td>
+                        <td>${statusBadge}</td>
+                        <td style="text-align:center;">${acoes}</td>
+                    </tr>
+                `;
+            }).join('');
+        } else {
+            tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding:30px;" class="text-muted">Nenhum lançamento avulso cadastrado.</td></tr>`;
+        }
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+    } catch (e) {
+        console.error(e);
+        tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:#ef4444; padding:20px;">Falha ao carregar lançamentos avulsos.</td></tr>`;
+    }
+}
+
+function prepararEdicaoAvulso(jsonString) {
+    const a = JSON.parse(decodeURIComponent(jsonString));
+    document.getElementById('avulso-id').value = a.id;
+    document.getElementById('avulso-motorista-id').value = a.motorista_id;
+    document.getElementById('avulso-tipo').value = a.tipo;
+    document.getElementById('avulso-data').value = a.data;
+    document.getElementById('avulso-descricao').value = a.descricao || '';
+    
+    toggleTipoAvulso();
+    aoMudarMotoristaAvulso();
+
+    if (a.tipo === 'carga_avulsa') {
+        document.getElementById('avulso-qtd').value = a.qtd_carga ? a.qtd_carga.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) : '';
+        document.getElementById('avulso-frete-unitario').value = a.valor_frete_unitario ? a.valor_frete_unitario.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '';
+        document.getElementById('avulso-frete').value = a.valor_frete ? a.valor_frete.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '';
+        document.getElementById('avulso-comissao').value = a.valor_comissao ? a.valor_comissao.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '';
+    } else {
+        document.getElementById('avulso-comissao-direta').value = a.valor_comissao ? a.valor_comissao.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '';
+    }
+
+    document.getElementById('avulso-form-titulo').innerText = 'Editar Lançamento Avulso';
+    document.getElementById('btn-cancelar-avulso').style.display = 'block';
+}
+
+function resetFormAvulso() {
+    document.getElementById('avulso-id').value = '';
+    document.getElementById('avulso-motorista-id').value = '';
+    document.getElementById('avulso-tipo').value = 'carga_avulsa';
+    document.getElementById('avulso-data').value = new Date().toISOString().split('T')[0];
+    document.getElementById('avulso-qtd').value = '';
+    document.getElementById('avulso-frete-unitario').value = '';
+    document.getElementById('avulso-frete').value = '';
+    document.getElementById('avulso-comissao').value = '';
+    document.getElementById('avulso-comissao-direta').value = '';
+    document.getElementById('avulso-descricao').value = '';
+    
+    const badge = document.getElementById('avulso-pct-badge');
+    if (badge) badge.innerText = '0%';
+
+    document.getElementById('avulso-form-titulo').innerText = 'Novo Lançamento Avulso';
+    document.getElementById('btn-cancelar-avulso').style.display = 'none';
+    toggleTipoAvulso();
+}
+
+async function excluirAvulso(id) {
+    const confirmResult = await Swal.fire({
+        title: 'Excluir lançamento?',
+        text: "Deseja realmente apagar este lançamento avulso permanentemente?",
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#ef4444',
+        cancelButtonColor: '#cbd5e1',
+        confirmButtonText: 'Sim, excluir',
+        cancelButtonText: 'Cancelar'
+    });
+
+    if (!confirmResult.isConfirmed) return;
+
+    try {
+        const res = await window.api.invoke('excluir-avulso-motorista', id);
+        if (res && res.success) {
+            avisar('success', 'Lançamento avulso excluído!');
+            listarAvulsos();
+        } else {
+            Swal.fire('Erro', tratarErroIpc(res.error), 'error');
+        }
+    } catch (e) {
+        console.error(e);
+        Swal.fire('Erro', 'Falha ao excluir lançamento avulso.', 'error');
+    }
+}
+
+function mascaraDecimais3(input) {
+    let raw = input.value;
+    if (!raw) return;
+
+    if (raw.includes('.') && raw.includes(',')) {
+        raw = raw.replace(/\./g, '');
+    }
+
+    let hasExplicitComma = false;
+    let parts = raw.replace('.', ',').split(',');
+    if (parts.length > 1) {
+        let dec = parts.slice(1).join('').replace(/\D/g, '');
+        // Se tem mais de 3 decimais, veio de digitação contínua (ex: 3,500 + 0 = 3,5000)
+        if (dec.length <= 3) {
+            hasExplicitComma = true;
+        }
+    }
+
+    if (hasExplicitComma) {
+        let int = parts[0].replace(/\D/g, '') || '0';
+        let dec = parts.slice(1).join('').replace(/\D/g, '').slice(0, 3);
+        int = int.replace(/^0+(?=\d)/, '');
+        if (!int) int = '0';
+        int = int.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+        input.value = int + ',' + dec;
+    } else {
+        let digits = raw.replace(/\D/g, '');
+        if (!digits) { input.value = ''; return; }
+        if (digits.length > 3) {
+            let int = digits.slice(0, -3);
+            let dec = digits.slice(-3);
+            int = int.replace(/^0+(?=\d)/, '') || '0';
+            int = int.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+            input.value = int + ',' + dec;
+        } else {
+            input.value = digits;
+        }
+    }
+}
+
+function finalizarDecimais3(input) {
+    let val = input.value.trim();
+    if (!val) return;
+    val = val.replace(/\./g, '').replace(',', '.');
+    let num = parseFloat(val);
+    if (isNaN(num)) {
+        input.value = '';
         return;
     }
-    if (value.length > 2) {
-        value = value.slice(0, -2) + ',' + value.slice(-2);
+    input.value = num.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+}
+
+function mascaraMoeda(input) {
+    let raw = input.value;
+    if (!raw) return;
+
+    if (raw.includes('.') && raw.includes(',')) {
+        raw = raw.replace(/\./g, '');
     }
-    input.value = value;
+
+    let hasExplicitComma = false;
+    let parts = raw.replace('.', ',').split(',');
+    if (parts.length > 1) {
+        let dec = parts.slice(1).join('').replace(/\D/g, '');
+        // Se tem mais de 2 decimais, veio de digitação contínua (ex: 5,00 + 0 = 5,000)
+        if (dec.length <= 2) {
+            hasExplicitComma = true;
+        }
+    }
+
+    if (hasExplicitComma) {
+        let int = parts[0].replace(/\D/g, '') || '0';
+        let dec = parts.slice(1).join('').replace(/\D/g, '').slice(0, 2);
+        int = int.replace(/^0+(?=\d)/, '');
+        if (!int) int = '0';
+        int = int.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+        input.value = int + ',' + dec;
+    } else {
+        let digits = raw.replace(/\D/g, '');
+        if (!digits) { input.value = ''; return; }
+        if (digits.length > 2) {
+            let int = digits.slice(0, -2);
+            let dec = digits.slice(-2);
+            int = int.replace(/^0+(?=\d)/, '') || '0';
+            int = int.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+            input.value = int + ',' + dec;
+        } else {
+            input.value = digits;
+        }
+    }
+}
+
+function finalizarMoeda(input) {
+    let val = input.value.trim();
+    if (!val) return;
+    val = val.replace(/\./g, '').replace(',', '.');
+    let num = parseFloat(val);
+    if (isNaN(num)) {
+        input.value = '';
+        return;
+    }
+    input.value = num.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 // ============================================================

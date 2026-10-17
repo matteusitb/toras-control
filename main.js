@@ -357,12 +357,33 @@ db.exec(`
         FOREIGN KEY (fechamento_id) REFERENCES motorista_fechamentos(id)
     );
 
+    CREATE TABLE IF NOT EXISTS motorista_avulsos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        motorista_id INTEGER NOT NULL,
+        tipo TEXT NOT NULL,          -- 'carga_avulsa', 'baldeio', 'outros'
+        data TEXT NOT NULL,
+        descricao TEXT,
+        qtd_carga REAL DEFAULT 0,
+        valor_frete_unitario REAL DEFAULT 0,
+        valor_frete REAL DEFAULT 0,
+        valor_comissao REAL NOT NULL,
+        status TEXT DEFAULT 'aberto', -- 'aberto', 'pago'
+        fechamento_id INTEGER,
+        data_criacao DATETIME DEFAULT CURRENT_TIMESTAMP,
+        sync_status TEXT DEFAULT 'pending',
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (motorista_id) REFERENCES motoristas(id),
+        FOREIGN KEY (fechamento_id) REFERENCES motorista_fechamentos(id)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_toras_codigo ON toras(codigo);
     CREATE INDEX IF NOT EXISTS idx_toras_lote ON toras(lote_id);
     CREATE INDEX IF NOT EXISTS idx_logs_data ON logs(data_hora);
     CREATE INDEX IF NOT EXISTS idx_toras_especie ON toras(especie_id);
     CREATE INDEX IF NOT EXISTS idx_motorista_vales_motorista ON motorista_vales(motorista_id);
     CREATE INDEX IF NOT EXISTS idx_motorista_fechamentos_motorista ON motorista_fechamentos(motorista_id);
+    CREATE INDEX IF NOT EXISTS idx_motorista_avulsos_motorista ON motorista_avulsos(motorista_id);
+    CREATE INDEX IF NOT EXISTS idx_motorista_avulsos_fechamento ON motorista_avulsos(fechamento_id);
 `);
 
 // Migrações para adaptar o banco anterior ao novo modelo de cubagem
@@ -415,6 +436,36 @@ try { db.exec("UPDATE romaneios SET updated_at = CURRENT_TIMESTAMP WHERE updated
 
 // Migrações para senha com criptografia forte (PBKDF2)
 try { db.exec("ALTER TABLE usuarios ADD COLUMN password_salt TEXT;"); } catch (e) { }
+
+// Migrações para lançamentos avulsos e cálculo de salário proporcional em fechamentos
+try {
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS motorista_avulsos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            motorista_id INTEGER NOT NULL,
+            tipo TEXT NOT NULL,
+            data TEXT NOT NULL,
+            descricao TEXT,
+            qtd_carga REAL DEFAULT 0,
+            valor_frete_unitario REAL DEFAULT 0,
+            valor_frete REAL DEFAULT 0,
+            valor_comissao REAL NOT NULL,
+            status TEXT DEFAULT 'aberto',
+            fechamento_id INTEGER,
+            data_criacao DATETIME DEFAULT CURRENT_TIMESTAMP,
+            sync_status TEXT DEFAULT 'pending',
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (motorista_id) REFERENCES motoristas(id),
+            FOREIGN KEY (fechamento_id) REFERENCES motorista_fechamentos(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_motorista_avulsos_motorista ON motorista_avulsos(motorista_id);
+        CREATE INDEX IF NOT EXISTS idx_motorista_avulsos_fechamento ON motorista_avulsos(fechamento_id);
+    `);
+} catch (e) { }
+try { db.exec("ALTER TABLE motorista_avulsos ADD COLUMN valor_frete_unitario REAL DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE motorista_fechamentos ADD COLUMN valor_avulsos REAL DEFAULT 0;"); } catch (e) { }
+try { db.exec("ALTER TABLE motorista_fechamentos ADD COLUMN salario_tipo TEXT DEFAULT 'integral';"); } catch (e) { }
+try { db.exec("ALTER TABLE motorista_fechamentos ADD COLUMN dias_trabalhados INTEGER DEFAULT 30;"); } catch (e) { }
 
 // Reativa chaves estrangeiras após a conclusão de todas as migrações
 db.pragma('foreign_keys = ON');
@@ -1839,10 +1890,48 @@ protectedHandle('relatorio-entradas-fornecedor', async (event, filtros) => {
             }
         }
         sql += " GROUP BY r.id ORDER BY r.data DESC, r.id DESC";
-        return db.prepare(sql).all(...params);
+        const romaneios = db.prepare(sql).all(...params);
+
+        let sqlEspecies = `
+            SELECT IFNULL(e.nome, 'Indefinida') as especie_nome,
+                   COUNT(t.id) as total_toras,
+                   IFNULL(SUM(t.volume), 0) as vol_liquido,
+                   IFNULL(SUM(t.volume_bruto), 0) as vol_bruto
+            FROM toras t
+            INNER JOIN romaneios r ON t.romaneio_id = r.id
+            LEFT JOIN especies e ON t.especie_id = e.id
+            WHERE 1=1
+        `;
+        const paramsEspecies = [];
+        if (filtros.fornecedorId && filtros.fornecedorId !== 'todos') {
+            sqlEspecies += " AND r.fornecedor_id = ?";
+            paramsEspecies.push(filtros.fornecedorId);
+        }
+        if (filtros.dataInicio && filtros.dataFim) {
+            sqlEspecies += " AND r.data BETWEEN ? AND ?";
+            paramsEspecies.push(filtros.dataInicio, filtros.dataFim);
+        }
+        if (filtros.romaneioInicio) {
+            const valInicio = parseRomaneioParaOrdenacao(filtros.romaneioInicio);
+            if (valInicio !== null) {
+                sqlEspecies += " AND (CAST(SUBSTR(r.numero, -4) AS INTEGER) * 100000 + CAST(SUBSTR(REPLACE(r.numero, 'ROM-', ''), 1, INSTR(REPLACE(r.numero, 'ROM-', ''), '/') - 1) AS INTEGER)) >= ?";
+                paramsEspecies.push(valInicio);
+            }
+        }
+        if (filtros.romaneioFim) {
+            const valFim = parseRomaneioParaOrdenacao(filtros.romaneioFim);
+            if (valFim !== null) {
+                sqlEspecies += " AND (CAST(SUBSTR(r.numero, -4) AS INTEGER) * 100000 + CAST(SUBSTR(REPLACE(r.numero, 'ROM-', ''), 1, INSTR(REPLACE(r.numero, 'ROM-', ''), '/') - 1) AS INTEGER)) <= ?";
+                paramsEspecies.push(valFim);
+            }
+        }
+        sqlEspecies += " GROUP BY IFNULL(e.nome, 'Indefinida') ORDER BY vol_liquido DESC, e.nome ASC";
+        const resumoEspecies = db.prepare(sqlEspecies).all(...paramsEspecies);
+
+        return { romaneios, resumoEspecies };
     } catch (err) {
         console.error("Erro relatorio-entradas-fornecedor:", err);
-        return [];
+        return { romaneios: [], resumoEspecies: [] };
     }
 });
 
@@ -2453,15 +2542,105 @@ protectedHandle('listar-vales-motorista', async (event, filtros = {}) => {
     }
 });
 
+// --- HANDLERS: LANÇAMENTOS AVULSOS DE MOTORISTAS ---
+
+protectedHandle('salvar-avulso-motorista', async (event, avulso) => {
+    try {
+        if (avulso.id) {
+            db.prepare(`
+                UPDATE motorista_avulsos SET
+                    motorista_id = ?, tipo = ?, data = ?, descricao = ?,
+                    qtd_carga = ?, valor_frete_unitario = ?, valor_frete = ?, valor_comissao = ?,
+                    sync_status = 'pending', updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            `).run(
+                avulso.motorista_id,
+                avulso.tipo,
+                avulso.data,
+                avulso.descricao || null,
+                avulso.qtd_carga || 0,
+                avulso.valor_frete_unitario || 0,
+                avulso.valor_frete || 0,
+                avulso.valor_comissao,
+                avulso.id
+            );
+            registrarLog('Operador', 'Edição Lançamento Avulso', `Lançamento Avulso ID ${avulso.id} editado.`);
+            return { success: true };
+        } else {
+            const res = db.prepare(`
+                INSERT INTO motorista_avulsos (
+                    motorista_id, tipo, data, descricao,
+                    qtd_carga, valor_frete_unitario, valor_frete, valor_comissao,
+                    status, sync_status, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'aberto', 'pending', CURRENT_TIMESTAMP)
+            `).run(
+                avulso.motorista_id,
+                avulso.tipo,
+                avulso.data,
+                avulso.descricao || null,
+                avulso.qtd_carga || 0,
+                avulso.valor_frete_unitario || 0,
+                avulso.valor_frete || 0,
+                avulso.valor_comissao
+            );
+            registrarLog('Operador', 'Cadastro Lançamento Avulso', `Lançamento Avulso (${avulso.tipo}) no valor de R$ ${avulso.valor_comissao} registrado.`);
+            return { success: true, id: res.lastInsertRowid };
+        }
+    } catch (err) {
+        console.error("Erro ao salvar lançamento avulso:", err);
+        return { success: false, error: err.message };
+    }
+});
+
+protectedHandle('excluir-avulso-motorista', async (event, id) => {
+    try {
+        const avulso = db.prepare("SELECT status FROM motorista_avulsos WHERE id = ?").get(id);
+        if (avulso && avulso.status === 'pago') {
+            return { success: false, error: "Não é possível excluir um lançamento que já foi consolidado em um fechamento." };
+        }
+        db.prepare("DELETE FROM motorista_avulsos WHERE id = ?").run(id);
+        registrarLog('Operador', 'Exclusão Lançamento Avulso', `Lançamento Avulso ID ${id} excluído.`);
+        return { success: true };
+    } catch (err) {
+        console.error("Erro ao excluir lançamento avulso:", err);
+        return { success: false, error: err.message };
+    }
+});
+
+protectedHandle('listar-avulsos-motorista', async (event, filtros = {}) => {
+    try {
+        let sql = `
+            SELECT a.*, m.nome as motorista_nome
+            FROM motorista_avulsos a
+            JOIN motoristas m ON a.motorista_id = m.id
+            WHERE 1=1
+        `;
+        const params = [];
+        if (filtros.motoristaId && filtros.motoristaId !== 'todos') {
+            sql += " AND a.motorista_id = ?";
+            params.push(filtros.motoristaId);
+        }
+        if (filtros.status && filtros.status !== 'todos') {
+            sql += " AND a.status = ?";
+            params.push(filtros.status);
+        }
+        sql += " ORDER BY a.data DESC, a.id DESC";
+        return db.prepare(sql).all(...params);
+    } catch (err) {
+        console.error("Erro ao listar lançamentos avulsos:", err);
+        return [];
+    }
+});
+
 protectedHandle('calcular-previa-fechamento', async (event, filtros) => {
     try {
-        const { motoristaId, dataInicio, dataFim, romaneioInicio, romaneioFim } = filtros;
+        const { motoristaId, dataInicio, dataFim, romaneioInicio, romaneioFim, salarioProporcional, diasTrabalhados } = filtros;
         const motorista = db.prepare("SELECT nome, salario, comissao FROM motoristas WHERE id = ?").get(motoristaId);
         if (!motorista) return { success: false, error: "Motorista não encontrado." };
 
-        // 1. Busca Cargas e calcula comissões
+        // 1. Busca Cargas e calcula comissões de romaneios
         let sqlCargas = `
-            SELECT r.id, r.numero, r.data, r.frete_total,
+            SELECT r.id, r.numero, r.data, r.frete_valor, r.frete_total,
                    (r.frete_total * (IFNULL(m.comissao, 0) / 100.0)) as valor_comissao,
                    COUNT(t.id) as total_toras,
                    IFNULL(SUM(t.volume_bruto), 0) as vol_bruto
@@ -2483,28 +2662,59 @@ protectedHandle('calcular-previa-fechamento', async (event, filtros) => {
         const cargas = db.prepare(sqlCargas).all(...paramsCargas);
         const totalComissao = cargas.reduce((sum, c) => sum + (c.valor_comissao || 0), 0);
 
-        // 2. Busca Vales (Adiantamentos) em aberto para o motorista
+        // 2. Busca Lançamentos Avulsos (Cargas Avulsas, Baldeios e Outros) em aberto
+        const avulsos = db.prepare(`
+            SELECT id, tipo, data, descricao, qtd_carga, valor_frete_unitario, valor_frete, valor_comissao
+            FROM motorista_avulsos
+            WHERE motorista_id = ? AND status = 'aberto'
+            ORDER BY data ASC
+        `).all(motoristaId);
+        const totalAvulsos = avulsos.reduce((sum, a) => sum + (a.valor_comissao || 0), 0);
+
+        // 3. Busca Vales (Adiantamentos) em aberto para o motorista
         const vales = db.prepare(`
             SELECT id, valor, data, descricao 
             FROM motorista_vales 
             WHERE motorista_id = ? AND status = 'aberto'
             ORDER BY data ASC
         `).all(motoristaId);
-
         const totalVales = vales.reduce((sum, v) => sum + v.valor, 0);
+
+        // 4. Cálculo do Salário (Integral ou Proporcional base comercial de 30 dias)
+        const salarioBase = motorista.salario || 0;
+        let salarioCalculado = salarioBase;
+        let diasCalculados = 30;
+
+        if (salarioProporcional && dataInicio && dataFim) {
+            if (diasTrabalhados && parseInt(diasTrabalhados) > 0) {
+                diasCalculados = parseInt(diasTrabalhados);
+            } else {
+                const dt1 = new Date(dataInicio + 'T00:00:00');
+                const dt2 = new Date(dataFim + 'T00:00:00');
+                const diffTime = dt2.getTime() - dt1.getTime();
+                const diffDays = Math.round(diffTime / (1000 * 3600 * 24)) + 1;
+                diasCalculados = diffDays > 0 ? diffDays : 1;
+            }
+            salarioCalculado = Math.round(((salarioBase / 30) * diasCalculados) * 100) / 100;
+        }
 
         return {
             success: true,
             motorista: {
                 nome: motorista.nome,
-                salario: motorista.salario || 0,
+                salario: salarioCalculado,
+                salario_base: salarioBase,
+                salario_proporcional: !!salarioProporcional,
+                dias_trabalhados: diasCalculados,
                 comissao_pct: motorista.comissao || 0
             },
             cargas,
             totalComissao,
+            avulsos,
+            totalAvulsos,
             vales,
             totalVales,
-            totalLiquido: (motorista.salario || 0) + totalComissao - totalVales
+            totalLiquido: salarioCalculado + totalComissao + totalAvulsos - totalVales
         };
     } catch (err) {
         console.error("Erro ao calcular prévia de fechamento:", err);
@@ -2519,8 +2729,10 @@ protectedHandle('salvar-fechamento-motorista', async (event, dados) => {
             INSERT INTO motorista_fechamentos (
                 motorista_id, data_fechamento, periodo_inicio, periodo_fim,
                 romaneio_inicio, romaneio_fim, valor_salario, valor_comissao,
-                valor_vales, valor_liquido, observacoes, sync_status, updated_at
-            ) VALUES (?, CURRENT_DATE, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP)
+                valor_avulsos, valor_vales, valor_liquido,
+                salario_tipo, dias_trabalhados,
+                observacoes, sync_status, updated_at
+            ) VALUES (?, CURRENT_DATE, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP)
         `).run(
             dados.motorista_id,
             dados.periodo_inicio,
@@ -2529,8 +2741,11 @@ protectedHandle('salvar-fechamento-motorista', async (event, dados) => {
             dados.romaneio_fim || null,
             dados.valor_salario,
             dados.valor_comissao,
+            dados.valor_avulsos || 0,
             dados.valor_vales,
             dados.valor_liquido,
+            dados.salario_tipo || 'integral',
+            dados.dias_trabalhados || 30,
             dados.observacoes || null
         );
 
@@ -2545,6 +2760,18 @@ protectedHandle('salvar-fechamento-motorista', async (event, dados) => {
             `);
             for (const valeId of dados.valesIds) {
                 stmtVale.run(fechamentoId, valeId);
+            }
+        }
+
+        // 3. Vincula os lançamentos avulsos selecionados a este fechamento e muda para 'pago'
+        if (dados.avulsosIds && Array.isArray(dados.avulsosIds) && dados.avulsosIds.length > 0) {
+            const stmtAvulso = db.prepare(`
+                UPDATE motorista_avulsos
+                SET status = 'pago', fechamento_id = ?, sync_status = 'pending', updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND status = 'aberto'
+            `);
+            for (const avulsoId of dados.avulsosIds) {
+                stmtAvulso.run(fechamentoId, avulsoId);
             }
         }
 
@@ -2590,10 +2817,17 @@ protectedHandle('excluir-fechamento-motorista', async (event, id) => {
             WHERE fechamento_id = ?
         `).run(id);
 
-        // 2. Deleta o fechamento
+        // 2. Libera os lançamentos avulsos vinculados de volta para 'aberto'
+        db.prepare(`
+            UPDATE motorista_avulsos 
+            SET status = 'aberto', fechamento_id = NULL, sync_status = 'pending', updated_at = CURRENT_TIMESTAMP
+            WHERE fechamento_id = ?
+        `).run(id);
+
+        // 3. Deleta o fechamento
         db.prepare("DELETE FROM motorista_fechamentos WHERE id = ?").run(id);
 
-        registrarLog('Operador', 'Estorno Fechamento', `Fechamento ID ${id} estornado. Vales voltaram para aberto.`);
+        registrarLog('Operador', 'Estorno Fechamento', `Fechamento ID ${id} estornado. Vales e lançamentos avulsos voltaram para aberto.`);
         return { success: true };
     });
 
@@ -2618,7 +2852,7 @@ protectedHandle('get-fechamento-detalhado', async (event, id) => {
 
         // 1. Busca os romaneios daquele motorista no período
         let sqlCargas = `
-            SELECT r.id, r.numero, r.data, r.frete_total,
+            SELECT r.id, r.numero, r.data, r.frete_valor, r.frete_total,
                    (r.frete_total * (IFNULL(m.comissao, 0) / 100.0)) as valor_comissao,
                    COUNT(t.id) as total_toras,
                    IFNULL(SUM(t.volume_bruto), 0) as vol_bruto
@@ -2648,7 +2882,15 @@ protectedHandle('get-fechamento-detalhado', async (event, id) => {
             ORDER BY data ASC
         `).all(id);
 
-        return { success: true, fechamento, cargas, vales };
+        // 3. Busca os lançamentos avulsos vinculados a este fechamento
+        const avulsos = db.prepare(`
+            SELECT id, tipo, data, descricao, qtd_carga, valor_frete_unitario, valor_frete, valor_comissao
+            FROM motorista_avulsos
+            WHERE fechamento_id = ?
+            ORDER BY data ASC
+        `).all(id);
+
+        return { success: true, fechamento, cargas, vales, avulsos };
     } catch (err) {
         console.error("Erro ao detalhar fechamento:", err);
         return { success: false, error: err.message };
